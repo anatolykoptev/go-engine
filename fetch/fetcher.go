@@ -123,6 +123,12 @@ func (f *Fetcher) HasProxy() bool {
 	return f.browserClient != nil
 }
 
+// BrowserClient returns the underlying stealth BrowserClient, or nil.
+// Use this to share the browser client with search functions (DDG, Startpage).
+func (f *Fetcher) BrowserClient() *stealth.BrowserClient {
+	return f.browserClient
+}
+
 // fetchViaProxy routes through BrowserClient with Chrome TLS fingerprint.
 func (f *Fetcher) fetchViaProxy(ctx context.Context, fetchURL string) ([]byte, error) {
 	headers := ChromeHeaders()
