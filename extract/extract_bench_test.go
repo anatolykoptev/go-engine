@@ -1,6 +1,7 @@
 package extract
 
 import (
+	"context"
 	"net/url"
 	"testing"
 )
@@ -37,6 +38,6 @@ func BenchmarkExtract_Full(b *testing.B) {
 	pageURL, _ := url.Parse("https://example.com/article")
 	b.ResetTimer()
 	for b.Loop() {
-		_, _ = ext.Extract(benchHTML, pageURL)
+		_, _ = ext.Extract(context.Background(), benchHTML, pageURL)
 	}
 }

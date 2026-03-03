@@ -1,6 +1,7 @@
 package extract
 
 import (
+	"context"
 	"net/url"
 	"strings"
 	"testing"
@@ -45,7 +46,7 @@ func TestExtractor_Extract_Trafilatura(t *testing.T) {
 	ext := New()
 	pageURL, _ := url.Parse("https://example.com/article")
 
-	result, err := ext.Extract([]byte(sampleHTML), pageURL)
+	result, err := ext.Extract(context.Background(), []byte(sampleHTML), pageURL)
 	if err != nil {
 		t.Fatalf("Extract: %v", err)
 	}
@@ -67,7 +68,7 @@ func TestExtractor_Extract_Trafilatura(t *testing.T) {
 
 func TestExtractor_Extract_MinimalHTML(t *testing.T) {
 	ext := New()
-	result, err := ext.Extract([]byte(minimalHTML), nil)
+	result, err := ext.Extract(context.Background(), []byte(minimalHTML), nil)
 	if err != nil {
 		t.Fatalf("Extract: %v", err)
 	}
@@ -78,7 +79,7 @@ func TestExtractor_Extract_MinimalHTML(t *testing.T) {
 
 func TestExtractor_Extract_MaxContentLen(t *testing.T) {
 	ext := New(WithMaxContentLen(20))
-	result, err := ext.Extract([]byte(sampleHTML), nil)
+	result, err := ext.Extract(context.Background(), []byte(sampleHTML), nil)
 	if err != nil {
 		t.Fatalf("Extract: %v", err)
 	}
@@ -174,7 +175,7 @@ func TestExtractor_RegexStripsScriptStyle(t *testing.T) {
 
 func TestExtractor_EmptyBody(t *testing.T) {
 	ext := New()
-	result, err := ext.Extract([]byte(""), nil)
+	result, err := ext.Extract(context.Background(), []byte(""), nil)
 	if err != nil {
 		t.Fatalf("Extract empty: %v", err)
 	}
@@ -184,7 +185,7 @@ func TestExtractor_EmptyBody(t *testing.T) {
 
 func TestExtractor_InvalidHTML(t *testing.T) {
 	ext := New()
-	result, err := ext.Extract([]byte("not html at all, just text"), nil)
+	result, err := ext.Extract(context.Background(), []byte("not html at all, just text"), nil)
 	if err != nil {
 		t.Fatalf("Extract invalid: %v", err)
 	}

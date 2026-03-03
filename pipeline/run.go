@@ -138,7 +138,7 @@ func (p *Pipeline) buildFetchFn(query string) func(ctx context.Context, rawURL s
 			return "", err
 		}
 		u, _ := url.Parse(rawURL)
-		result, err := p.extractor.Extract(body, u)
+		result, err := p.extractor.Extract(ctx, body, u)
 		if err != nil {
 			return "", err
 		}

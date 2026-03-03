@@ -373,6 +373,6 @@ func TestHR_Pipeline_ExtractorReturnsEmpty(t *testing.T) {
 
 type emptyExtractor struct{}
 
-func (e *emptyExtractor) Extract(_ []byte, _ *url.URL) (*extract.Result, error) {
+func (e *emptyExtractor) Extract(_ context.Context, _ []byte, _ *url.URL) (*extract.Result, error) {
 	return &extract.Result{Content: ""}, nil
 }

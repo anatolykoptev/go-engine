@@ -8,6 +8,7 @@
 package extract
 
 import (
+	"context"
 	"net/url"
 )
 
@@ -45,7 +46,7 @@ func New(opts ...Option) *Extractor {
 // Extract extracts article content from HTML body bytes.
 // Uses a three-tier fallback chain: trafilatura → goquery → regex.
 // pageURL is used by trafilatura for site-specific extraction rules.
-func (e *Extractor) Extract(body []byte, pageURL *url.URL) (*Result, error) {
+func (e *Extractor) Extract(_ context.Context, body []byte, pageURL *url.URL) (*Result, error) {
 	// Tier 1: go-trafilatura (best accuracy, 3-tier internal fallback).
 	if result, err := e.extractTrafilatura(body, pageURL); err == nil && result.Content != "" {
 		return result, nil
