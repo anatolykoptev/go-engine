@@ -4,6 +4,8 @@ import (
 	"context"
 	"log/slog"
 	"time"
+
+	"golang.org/x/sync/singleflight"
 )
 
 // Tiered chains an L1 (fast, volatile) and L2 (persistent) cache.
@@ -13,6 +15,7 @@ type Tiered struct {
 	l1  Cache
 	l2  Cache
 	ttl time.Duration // default TTL used for L1 promotion
+	sf  singleflight.Group
 }
 
 // NewTiered creates a tiered cache. l2 may be nil (L1-only mode).
@@ -67,4 +70,28 @@ func (t *Tiered) Stats() (hits, misses int64) {
 		return h1 + h2, m1 + m2
 	}
 	return h1, m1
+}
+
+// GetOrFetch returns a cached value or calls fetchFn exactly once per key.
+// Concurrent callers for the same key share the single fetch result
+// (singleflight deduplication). On success, the result is cached in both tiers.
+func (t *Tiered) GetOrFetch(ctx context.Context, key string, ttl time.Duration,
+	fetchFn func(ctx context.Context) ([]byte, error)) ([]byte, error) {
+
+	if val, ok := t.Get(ctx, key); ok {
+		return val, nil
+	}
+
+	v, err, _ := t.sf.Do(key, func() (any, error) {
+		val, fetchErr := fetchFn(ctx)
+		if fetchErr != nil {
+			return nil, fetchErr
+		}
+		_ = t.Set(ctx, key, val, ttl)
+		return val, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return v.([]byte), nil
 }
