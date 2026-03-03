@@ -15,17 +15,22 @@ import (
 	"github.com/anatolykoptev/go-engine/text"
 )
 
-const defaultMaxConcurrency = 10
+const (
+	defaultMaxConcurrency = 10
+	defaultMaxTokens      = 4096
+)
 
 // Pipeline orchestrates: sources → fetch → extract → chunk → filter → llm.
 type Pipeline struct {
-	sources   []sources.Source
-	fetchFn   func(ctx context.Context, url string) ([]byte, error)
-	extractor extract.Strategy
-	chunker   text.Chunker
-	filter    text.Filter
-	llm       *llm.Client
-	maxConc   int
+	sources       []sources.Source
+	fetchFn       func(ctx context.Context, url string) ([]byte, error)
+	extractor     extract.Strategy
+	chunker       text.Chunker
+	filter        text.Filter
+	llm           *llm.Client
+	maxConc       int
+	maxTokens     int
+	charsPerToken float64
 }
 
 // Option configures a Pipeline.
@@ -66,10 +71,24 @@ func WithPipelineConcurrency(n int) Option {
 	return func(p *Pipeline) { p.maxConc = n }
 }
 
+// WithMaxTokenBudget sets the per-source token budget for content truncation.
+func WithMaxTokenBudget(n int) Option {
+	return func(p *Pipeline) { p.maxTokens = n }
+}
+
+// WithCharsPerToken sets the characters-per-token ratio for token estimation.
+func WithCharsPerToken(f float64) Option {
+	return func(p *Pipeline) { p.charsPerToken = f }
+}
+
 // NewPipeline creates a Pipeline with the given options.
 // Default max concurrency is 10.
 func NewPipeline(opts ...Option) *Pipeline {
-	p := &Pipeline{maxConc: defaultMaxConcurrency}
+	p := &Pipeline{
+		maxConc:       defaultMaxConcurrency,
+		maxTokens:     defaultMaxTokens,
+		charsPerToken: text.DefaultCharsPerToken,
+	}
 	for _, o := range opts {
 		o(p)
 	}
@@ -105,7 +124,7 @@ func (p *Pipeline) Run(ctx context.Context, query string) (*SearchOutput, error)
 
 	// 5. Summarize with LLM.
 	if p.llm != nil {
-		out, err := p.llm.Summarize(ctx, query, contentLimitChars, srcResults, contents)
+		out, err := p.llm.Summarize(ctx, query, p.maxTokens, p.charsPerToken, srcResults, contents)
 		if err != nil {
 			return nil, err
 		}
@@ -115,8 +134,6 @@ func (p *Pipeline) Run(ctx context.Context, query string) (*SearchOutput, error)
 	// No LLM — return sources without answer.
 	return p.buildOutput(query, &llm.StructuredOutput{}, srcResults), nil
 }
-
-const contentLimitChars = 6000
 
 // buildFetchFn wraps p.fetchFn + p.extractor into the string-returning signature
 // expected by ParallelFetch.

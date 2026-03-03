@@ -200,7 +200,7 @@ func TestBuildSourcesText_Snippets(t *testing.T) {
 		{Title: "Title1", URL: "http://a.com", Content: "snippet1"},
 		{Title: "Title2", URL: "http://b.com", Content: "snippet2"},
 	}
-	got := BuildSourcesText(results, nil, 1000)
+	got := BuildSourcesText(results, nil, 1000, 3.5)
 	if !strings.Contains(got, "[1] Title1") {
 		t.Errorf("missing [1] Title1 in: %s", got)
 	}
@@ -214,7 +214,7 @@ func TestBuildSourcesText_WithContents(t *testing.T) {
 		{Title: "Title1", URL: "http://a.com", Content: "snippet1"},
 	}
 	contents := map[string]string{"http://a.com": "full content here"}
-	got := BuildSourcesText(results, contents, 1000)
+	got := BuildSourcesText(results, contents, 1000, 3.5)
 	if !strings.Contains(got, "Content: full content here") {
 		t.Errorf("should include content: %s", got)
 	}
@@ -228,9 +228,13 @@ func TestBuildSourcesText_TruncatesContent(t *testing.T) {
 		{Title: "T", URL: "http://a.com"},
 	}
 	contents := map[string]string{"http://a.com": "abcdefghij"}
-	got := BuildSourcesText(results, contents, 5)
-	if !strings.Contains(got, "abcde...") {
+	// maxTokens=1, charsPerToken=5.0 → 5-byte budget → truncates "abcdefghij" to "abcde"
+	got := BuildSourcesText(results, contents, 1, 5.0)
+	if !strings.Contains(got, "Content: abcde") {
 		t.Errorf("should truncate content: %s", got)
+	}
+	if strings.Contains(got, "abcdefghij") {
+		t.Error("content should be truncated, but found full string")
 	}
 }
 
@@ -241,7 +245,7 @@ func TestSummarizeWithInstruction(t *testing.T) {
 
 	c := New(WithAPIBase(srv.URL), WithAPIKey("key"), WithModel("test"))
 	results := []sources.Result{{Title: "T", URL: "http://a.com", Content: "c"}}
-	got, err := c.SummarizeWithInstruction(context.Background(), "q", "instr", 1000, results, nil)
+	got, err := c.SummarizeWithInstruction(context.Background(), "q", "instr", 1000, 3.5, results, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -260,7 +264,7 @@ func TestSummarizeDeep(t *testing.T) {
 
 	c := New(WithAPIBase(srv.URL), WithAPIKey("key"), WithModel("test"))
 	results := []sources.Result{{Title: "T", URL: "http://a.com", Content: "c"}}
-	got, err := c.SummarizeDeep(context.Background(), "q", "instr", 1000, results, nil)
+	got, err := c.SummarizeDeep(context.Background(), "q", "instr", 1000, 3.5, results, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -277,7 +281,7 @@ func TestSummarize_MalformedJSON(t *testing.T) {
 	defer srv.Close()
 
 	c := New(WithAPIBase(srv.URL), WithAPIKey("key"), WithModel("test"))
-	got, err := c.SummarizeWithInstruction(context.Background(), "q", "", 1000, nil, nil)
+	got, err := c.SummarizeWithInstruction(context.Background(), "q", "", 1000, 3.5, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -297,7 +301,7 @@ func TestSummarizeToJSON(t *testing.T) {
 
 	c := New(WithAPIBase(srv.URL), WithAPIKey("key"), WithModel("test"))
 	results := []sources.Result{{Title: "T", URL: "http://a.com"}}
-	got, raw, err := SummarizeToJSON[custom](context.Background(), c, "q", "instr", 1000, results, nil)
+	got, raw, err := SummarizeToJSON[custom](context.Background(), c, "q", "instr", 1000, 3.5, results, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -315,7 +319,7 @@ func TestSummarizeToJSON_ParseFailure(t *testing.T) {
 
 	c := New(WithAPIBase(srv.URL), WithAPIKey("key"), WithModel("test"))
 	type custom struct{ Name string }
-	got, raw, err := SummarizeToJSON[custom](context.Background(), c, "q", "instr", 1000, nil, nil)
+	got, raw, err := SummarizeToJSON[custom](context.Background(), c, "q", "instr", 1000, 3.5, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
