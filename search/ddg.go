@@ -1,6 +1,7 @@
 package search
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -87,8 +88,14 @@ func ddgSearchHTML(ctx context.Context, bc BrowserDoer, query, region string) ([
 	if err != nil {
 		return nil, err
 	}
+	if status == http.StatusTooManyRequests || status == http.StatusForbidden {
+		return nil, &ErrRateLimited{Engine: "ddg"}
+	}
 	if status != http.StatusOK {
 		return nil, fmt.Errorf("ddg html status %d", status)
+	}
+	if isDDGRateLimited(data) {
+		return nil, &ErrRateLimited{Engine: "ddg"}
 	}
 
 	return ParseDDGHTML(data)
@@ -198,6 +205,9 @@ func ddgSearchDJS(ctx context.Context, bc BrowserDoer, query, vqd, region string
 	if err != nil {
 		return nil, err
 	}
+	if status == http.StatusTooManyRequests || status == http.StatusForbidden {
+		return nil, &ErrRateLimited{Engine: "ddg"}
+	}
 	if status != http.StatusOK && status != http.StatusAccepted {
 		return nil, fmt.Errorf("ddg d.js status %d", status)
 	}
@@ -256,4 +266,23 @@ func ExtractVQD(body string) string {
 		}
 	}
 	return ""
+}
+
+// isDDGRateLimited checks whether the DDG response body indicates a CAPTCHA
+// or rate-limit page. It looks for known captcha markers on a lowercased copy.
+func isDDGRateLimited(body []byte) bool {
+	low := bytes.ToLower(body)
+	for _, marker := range [][]byte{
+		[]byte("please try again"),
+		[]byte("not a robot"),
+		[]byte("unusual traffic"),
+		[]byte("blocked"),
+	} {
+		if bytes.Contains(low, marker) {
+			return true
+		}
+	}
+	// DDG captcha form: action="/d.js" combined with type="hidden".
+	return bytes.Contains(low, []byte(`action="/d.js"`)) &&
+		bytes.Contains(low, []byte(`type="hidden"`))
 }
