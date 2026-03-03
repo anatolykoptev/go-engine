@@ -1,6 +1,7 @@
 package search
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"log/slog"
@@ -42,8 +43,14 @@ func SearchStartpageDirect(ctx context.Context, bc BrowserDoer, query, language 
 	if err != nil {
 		return nil, fmt.Errorf("startpage request: %w", err)
 	}
+	if status == http.StatusTooManyRequests || status == http.StatusForbidden {
+		return nil, &ErrRateLimited{Engine: "startpage"}
+	}
 	if status != http.StatusOK {
 		return nil, fmt.Errorf("startpage status %d", status)
+	}
+	if isStartpageRateLimited(data) {
+		return nil, &ErrRateLimited{Engine: "startpage"}
 	}
 
 	results, err := ParseStartpageHTML(data)
@@ -93,4 +100,22 @@ func ParseStartpageHTML(data []byte) ([]sources.Result, error) {
 	})
 
 	return results, nil
+}
+
+// isStartpageRateLimited returns true when the response body contains
+// markers indicating Startpage has blocked or rate-limited the request.
+func isStartpageRateLimited(body []byte) bool {
+	lower := bytes.ToLower(body)
+	markers := [][]byte{
+		[]byte("rate limited"),
+		[]byte("too many requests"),
+		[]byte("g-recaptcha"),
+		[]byte("captcha"),
+	}
+	for _, m := range markers {
+		if bytes.Contains(lower, m) {
+			return true
+		}
+	}
+	return false
 }

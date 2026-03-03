@@ -129,3 +129,51 @@ func TestIsDDGRateLimited(t *testing.T) {
 		})
 	}
 }
+
+func TestIsStartpageRateLimited(t *testing.T) {
+	tests := []struct {
+		name string
+		body []byte
+		want bool
+	}{
+		{
+			name: "rate limited in body",
+			body: []byte(`<html><body><p>You have been rate limited.</p></body></html>`),
+			want: true,
+		},
+		{
+			name: "too many requests in body",
+			body: []byte(`<html><body><h1>Too many requests</h1></body></html>`),
+			want: true,
+		},
+		{
+			name: "g-recaptcha in body",
+			body: []byte(`<html><body><div class="g-recaptcha" data-sitekey="abc"></div></body></html>`),
+			want: true,
+		},
+		{
+			name: "captcha in body",
+			body: []byte(`<html><body><form id="captcha-form"><input type="text"></form></body></html>`),
+			want: true,
+		},
+		{
+			name: "normal startpage results html",
+			body: []byte(`<html><body><div class="w-gl__result"><a class="w-gl__result-title" href="https://example.com">Example</a><p class="w-gl__description">A snippet.</p></div></body></html>`),
+			want: false,
+		},
+		{
+			name: "empty body",
+			body: []byte{},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isStartpageRateLimited(tt.body)
+			if got != tt.want {
+				t.Errorf("isStartpageRateLimited() = %v, want %v (body: %s)", got, tt.want, tt.body)
+			}
+		})
+	}
+}
