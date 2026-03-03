@@ -1,6 +1,6 @@
 # go-engine Roadmap
 
-> **Module:** `github.com/anatolykoptev/go-engine` | **Current:** v1.2.0 | **Updated:** 2026-03-03
+> **Module:** `github.com/anatolykoptev/go-engine` | **Current:** v1.3.0 | **Updated:** 2026-03-03
 
 **See also:** [ARCHITECTURE.md](ARCHITECTURE.md) | [COMPETITORS.md](COMPETITORS.md)
 
@@ -14,42 +14,30 @@
 | v1.0.0 | Stable API: sources, strategy interfaces, pipeline orchestrator, singleflight cache | `sources/`, `extract/`, `text/`, `cache/`, `pipeline/` |
 | v1.1.0 | Search quality: unified Result, rate limit detection, WRR fusion, dedup, categories, markdown | `search/`, `sources/`, `llm/`, `pipeline/` |
 | v1.2.0 | Pipeline robustness: fetch+chunk, auto-chunking, token budget, retry hooks/reset/tracker | `text/`, `llm/`, `pipeline/`, `fetch/` |
+| v1.3.0 | Extraction quality: format enum, LLM fallback, cleanup, system prompts | `extract/`, `llm/`, `pipeline/` |
 
-9 packages, 264 tests, benchmarks, Go 1.26. [v1.0.0 design](plans/2026-03-03-v1.0.0-design.md) | [v1.1.0 design](plans/2026-03-03-v1.1.0-design.md).
+9 packages, 280 tests, benchmarks, Go 1.26. [v1.0.0 design](plans/2026-03-03-v1.0.0-design.md) | [v1.1.0 design](plans/2026-03-03-v1.1.0-design.md).
 
-**v1.2.0 delivered:**
-- [x] **Fetch + immediate chunk** — merged chunk+filter into buildFetchFn goroutine (`pipeline/run.go`)
-- [x] **Auto-chunking detection** — `NeedsChunking()` method on CharacterChunker (`text/chunker.go`)
-- [x] **Token budget truncation** — `EstimateTokens()`, `TruncateToTokenBudget()` with configurable chars/token (`text/token.go`)
-- [x] **LLM token budget** — changed all `Summarize` signatures from contentLimit to maxTokens+charsPerToken (`llm/summarize.go`)
-- [x] **Retry hooks** — `RetryHookFunc` context-injected callback (go-stealth v1.3.0, re-exported in `fetch/`)
-- [x] **Retry with reset** — `RetryDoWithReset`, `RetryHTTPWithReset` (go-stealth v1.3.0)
-- [x] **Per-URL retry tracker** — `RetryTracker` with TTL eviction and permanent failure detection (go-stealth v1.3.0, integrated in `fetch/`)
+**v1.3.0 delivered:**
+- [x] **Configurable system prompt** — `CompleteWithSystem(ctx, system, prompt)` for task-specific LLM instructions (`llm/client.go`)
+- [x] **Enhanced Tier 2 cleanup** — extended goquery selectors with ARIA roles, ad patterns, hidden elements, attribute stripping (`extract/goquery.go`)
+- [x] **Tokenizer fast-path** — `StripScriptStyle` using `html.NewTokenizer` for large bodies >500KB (`extract/cleanup.go`)
+- [x] **Context in Strategy interface** — `Strategy.Extract` gains `context.Context` parameter (breaking change) (`extract/strategy.go`)
+- [x] **Format enum** — `FormatText`/`FormatMarkdown`/`FormatHTML` with `WithFormat` option; `Result.Markdown` removed (breaking change) (`extract/`)
+- [x] **LLM fallback extraction** — `WithLLMFallback` + `WithMinExtractChars` for thin content recovery (`extract/extractor.go`)
+- [x] **Pipeline integration** — ctx flows through pipeline to LLM fallback; verified with integration test (`pipeline/`)
 
 ---
 
-## Next: v1.3.0 — Extraction Quality
+## Next: v1.4.0
 
-*Sources: [Firecrawl](https://github.com/firecrawl/firecrawl), [Crawl4ai](https://github.com/unclecode/crawl4ai), [llm-scraper](https://github.com/mishushakov/llm-scraper)*
-
-**Extraction chain:**
-- [ ] **HTML pre-cleanup** — strip `<script>`, `<style>`, `<noscript>`, `<svg>`, hidden elements BEFORE extraction. llm-scraper's `cleanup.ts` (60 LOC) does this; trafilatura handles some but not all (`extract/`, ~40 LOC)
-- [ ] **LLM-backed extraction fallback** — when trafilatura + goquery yield < N chars or low quality, send cleaned HTML to LLM for extraction. Firecrawl's `extractSmartScrape` is called only below quality threshold (`extract/`, ~150 LOC)
-- [ ] **Dedicated markdown path** — separate HTML→Markdown conversion (html-to-markdown lib) from text extraction. Firecrawl has dedicated `html-to-markdown-client`; currently go-engine mixes text and markdown in trafilatura (`extract/`, ~60 LOC)
-- [ ] **Content-type aware preprocessing** — detect content type (article, forum, docs, list) and use different extraction strategy per type. Crawl4ai's `markdown_generation_strategy.py` adjusts output by content shape (`extract/`, ~80 LOC)
-
-**Filtering & ranking:**
-- [ ] **Per-strategy retry** — retry individual extraction tiers, not the whole chain. Crawl4ai's `execute_with_retry()` wraps each strategy step (`extract/`, ~30 LOC)
-
-**LLM client:**
-- [ ] **LLM streaming** — `CompleteStream()` returning `io.Reader` or channel for long summarizations. llm-scraper's `stream()` and GoClaw both support streaming (`llm/`, ~80 LOC)
-- [ ] **Configurable system prompt per task** — allow callers to set system prompt (summarize vs extract vs classify). Currently `Complete(prompt)` has no system prompt param; `CompleteParams` also lacks it (`llm/`, ~20 LOC)
+Not yet scoped. Candidates from backlog below, prioritized by consumer needs.
 
 ---
 
 ## Future
 
-Not scheduled. Evaluate after v1.3.0 based on consumer needs.
+Not scheduled. Evaluate based on consumer needs.
 
 **Architecture:**
 
@@ -81,6 +69,7 @@ Not scheduled. Evaluate after v1.3.0 based on consumer needs.
 |------|--------|---------|--------|-------|
 | OTel span tracing | GoClaw | `llm/`, `metrics/` | Medium | `emitLLMSpan()` with timing, model, token count, error — replace simple counters |
 | Configurable output schema | llm-scraper | `llm/` | Medium | Zod-like schema → `generateObject` pattern; consumers define expected JSON structure |
+| LLM streaming | llm-scraper | `llm/` | Medium | `CompleteStream()` returning `io.Reader` or channel for long summarizations |
 | Cron retry | GoClaw | `pipeline/` | Medium | Resubmit failed pipeline operations on schedule |
 
 **Content processing:**
@@ -90,7 +79,8 @@ Not scheduled. Evaluate after v1.3.0 based on consumer needs.
 | Semantic chunking | Crawl4ai, LLM_Web_search | `text/` | High | Embedding cosine distances between sentences → split at topic boundaries |
 | NER-based chunking | LLM_Web_search | `text/` | High | Token classification model detects semantic boundaries |
 | PDF/DOCX extraction | Firecrawl | `extract/` | High | Non-HTML format support via external libs |
-| Preprocessing modes | llm-scraper | `extract/` | Low | 6 modes: html, raw_html, markdown, text, image, custom — caller picks format |
+| Content-type aware preprocessing | Crawl4ai | `extract/` | Medium | Detect content type (article, forum, docs, list) and adjust extraction strategy |
+| Per-strategy retry | Crawl4ai | `extract/` | Low | Retry individual extraction tiers, not the whole chain |
 
 ---
 
@@ -103,5 +93,5 @@ Not scheduled. Evaluate after v1.3.0 based on consumer needs.
 | v0.7.0 | All core packages |
 | v1.0.0 | Stable API, sources, strategy interfaces, pipeline orchestrator, 194 tests |
 | v1.1.0 | Search quality: unified Result, rate limits, WRR fusion, dedup, categories, markdown — 215 tests |
-| **v1.2.0** | **Pipeline robustness: fetch+chunk, auto-chunking, token budget, retry hooks/reset/tracker — 264 tests** |
-| v1.3.0 | Extraction quality (7 items) |
+| v1.2.0 | Pipeline robustness: fetch+chunk, auto-chunking, token budget, retry hooks/reset/tracker — 264 tests |
+| **v1.3.0** | **Extraction quality: format enum, LLM fallback, cleanup, system prompts — 280 tests** |
