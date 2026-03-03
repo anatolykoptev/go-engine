@@ -193,3 +193,7 @@ func TestExtractor_InvalidHTML(t *testing.T) {
 		t.Errorf("expected plain text in content, got: %q", result.Content)
 	}
 }
+
+func TestExtractor_ImplementsStrategy(t *testing.T) {
+	var _ Strategy = New()
+}
