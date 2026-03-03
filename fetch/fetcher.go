@@ -73,6 +73,7 @@ func WithProxyPool(pool proxypool.ProxyPool) Option {
 		bc, err := stealth.NewClient(
 			stealth.WithTimeout(browserClientTimeoutSec),
 			stealth.WithProxyPool(pool),
+			stealth.WithFollowRedirects(),
 		)
 		if err != nil {
 			return
