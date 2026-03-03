@@ -107,6 +107,26 @@ func TestSearXNG_SearchSkipsAllLanguage(t *testing.T) {
 	}
 }
 
+func TestSearXNG_SearchWithCategories(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("categories") != "it" {
+			t.Errorf("categories = %q, want it", r.URL.Query().Get("categories"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"results":[]}`))
+	}))
+	defer srv.Close()
+
+	s := NewSearXNG(srv.URL)
+	_, err := s.SearchQuery(context.Background(), sources.Query{
+		Text:  "golang",
+		Extra: map[string]string{"categories": "it"},
+	})
+	if err != nil {
+		t.Fatalf("SearchQuery: %v", err)
+	}
+}
+
 // --- Filter tests ---
 
 func TestFilterByScore(t *testing.T) {

@@ -24,7 +24,7 @@ func SearchStartpageDirect(ctx context.Context, bc BrowserDoer, query, language 
 		return nil, err
 	}
 
-	if language == "" || language == "all" {
+	if language == "" || language == languageAll {
 		language = "english"
 	}
 
