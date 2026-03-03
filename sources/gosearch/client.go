@@ -69,7 +69,7 @@ func (c *Client) CheckHealth(ctx context.Context) bool {
 		c.ok.Store(false)
 		return false
 	}
-	resp, err := c.http.Do(req)
+	resp, err := c.http.Do(req) //nolint:gosec // baseURL is server config, not user input
 	if err != nil {
 		slog.Warn("go-search health check failed", slog.Any("error", err))
 		c.ok.Store(false)
@@ -114,7 +114,7 @@ func (c *Client) Search(ctx context.Context, query, timeRange string) ([]Result,
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "text/event-stream")
 
-	resp, err := c.http.Do(req)
+	resp, err := c.http.Do(req) //nolint:gosec // baseURL is server config, not user input
 	if err != nil {
 		c.ok.Store(false)
 		return nil, fmt.Errorf("go-search request: %w", err)
