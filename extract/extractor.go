@@ -4,7 +4,7 @@
 // Create an extractor with [New] and call [Extractor.Extract]:
 //
 //	ext := extract.New()
-//	result, err := ext.Extract(htmlBody, pageURL)
+//	result, err := ext.Extract(ctx, htmlBody, pageURL)
 package extract
 
 import (
@@ -14,14 +14,15 @@ import (
 
 // Result holds extracted content from an HTML page.
 type Result struct {
-	Title    string
-	Content  string // clean text
-	Markdown string // markdown (may be empty)
+	Title   string
+	Content string // content in the requested format
+	Format  Format // format of Content
 }
 
 // Extractor extracts article content from HTML bodies.
 type Extractor struct {
 	maxContentLen int
+	format        Format
 }
 
 // Option configures an Extractor.
@@ -34,9 +35,16 @@ func WithMaxContentLen(n int) Option {
 	return func(e *Extractor) { e.maxContentLen = n }
 }
 
+// WithFormat sets the output format (default FormatText).
+func WithFormat(f Format) Option {
+	return func(e *Extractor) { e.format = f }
+}
+
 // New creates an Extractor with the given options.
 func New(opts ...Option) *Extractor {
-	e := &Extractor{}
+	e := &Extractor{
+		format: FormatText,
+	}
 	for _, o := range opts {
 		o(e)
 	}

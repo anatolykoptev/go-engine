@@ -222,6 +222,84 @@ func TestExtractor_GoqueryStripsHiddenElements(t *testing.T) {
 	}
 }
 
+func TestExtractor_FormatTextDefault(t *testing.T) {
+	ext := New() // default = FormatText
+	result, err := ext.Extract(context.Background(), []byte(sampleHTML), nil)
+	if err != nil {
+		t.Fatalf("Extract: %v", err)
+	}
+	if result.Format != FormatText {
+		t.Errorf("format = %q, want %q", result.Format, FormatText)
+	}
+}
+
+func TestExtractor_FormatMarkdown(t *testing.T) {
+	ext := New(WithFormat(FormatMarkdown))
+	result, err := ext.Extract(context.Background(), []byte(sampleHTML), nil)
+	if err != nil {
+		t.Fatalf("Extract: %v", err)
+	}
+	if result.Content == "" {
+		t.Error("expected non-empty markdown content")
+	}
+	if result.Format != FormatMarkdown {
+		t.Errorf("format = %q, want %q", result.Format, FormatMarkdown)
+	}
+}
+
+func TestExtractor_FormatHTML(t *testing.T) {
+	ext := New(WithFormat(FormatHTML))
+	result, err := ext.extractGoquery([]byte(sampleHTML))
+	if err != nil {
+		t.Fatalf("extractGoquery: %v", err)
+	}
+	// Should contain HTML tags.
+	if !strings.Contains(result.Content, "<") {
+		t.Error("HTML format should contain HTML tags")
+	}
+	if result.Format != FormatHTML {
+		t.Errorf("format = %q, want %q", result.Format, FormatHTML)
+	}
+}
+
+func TestExtractor_GoqueryMarkdown(t *testing.T) {
+	ext := New(WithFormat(FormatMarkdown))
+	html := `<html><body><h1>Title</h1><p>Paragraph with <a href="https://example.com">a link</a>.</p></body></html>`
+	result, err := ext.extractGoquery([]byte(html))
+	if err != nil {
+		t.Fatalf("extractGoquery: %v", err)
+	}
+	// Markdown should contain link syntax.
+	if !strings.Contains(result.Content, "[a link]") || !strings.Contains(result.Content, "(https://example.com)") {
+		t.Errorf("markdown should contain link: %q", result.Content)
+	}
+}
+
+const attrHTML = `<html>
+<head><title>Attr Test</title></head>
+<body>
+<p style="color:red" class="intro" data-track="click" onclick="alert(1)">
+  Visit <a href="https://example.com" class="link" style="font-weight:bold">Example</a>
+</p>
+</body>
+</html>`
+
+func TestExtractor_GoqueryStripsAttributes(t *testing.T) {
+	ext := New(WithFormat(FormatHTML))
+	result, err := ext.extractGoquery([]byte(attrHTML))
+	if err != nil {
+		t.Fatalf("extractGoquery: %v", err)
+	}
+	if !strings.Contains(result.Content, `href="https://example.com"`) {
+		t.Error("href should be preserved in HTML output")
+	}
+	for _, attr := range []string{"style=", "class=", "data-track", "onclick"} {
+		if strings.Contains(result.Content, attr) {
+			t.Errorf("attribute %q should be stripped", attr)
+		}
+	}
+}
+
 func TestExtractor_ImplementsStrategy(t *testing.T) {
 	var _ Strategy = New()
 }

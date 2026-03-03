@@ -4,6 +4,7 @@ import (
 	"regexp"
 	"strings"
 
+	htmltomarkdown "github.com/JohannesKaufmann/html-to-markdown/v2"
 	"github.com/PuerkitoBio/goquery"
 )
 
@@ -24,9 +25,28 @@ var removeSelectors = strings.Join([]string{
 	"[aria-hidden=true]", "[hidden]",
 }, ", ")
 
-
 // contentSelectors are tried in order to find the main content element.
 const contentSelectors = "article, main, .content, .post-content, .article-content, #content"
+
+// allowedAttrs is the whitelist for attribute stripping.
+var allowedAttrs = map[string]bool{
+	"href": true, "src": true, "alt": true, "title": true,
+	"lang": true, "colspan": true, "rowspan": true,
+}
+
+// stripAttributes removes all attributes except allowedAttrs from all elements.
+func stripAttributes(doc *goquery.Document) {
+	doc.Find("*").Each(func(_ int, s *goquery.Selection) {
+		node := s.Get(0)
+		kept := node.Attr[:0]
+		for _, a := range node.Attr {
+			if allowedAttrs[a.Key] {
+				kept = append(kept, a)
+			}
+		}
+		node.Attr = kept
+	})
+}
 
 // extractGoquery uses goquery CSS selectors to extract main content.
 func (e *Extractor) extractGoquery(body []byte) (*Result, error) {
@@ -56,14 +76,28 @@ func (e *Extractor) extractGoquery(body []byte) (*Result, error) {
 		contentSel = doc.Find("body")
 	}
 
-	content := contentSel.Text()
-	content = strings.TrimSpace(content)
-	content = reWhitespace.ReplaceAllString(content, " ")
-	content = cleanLines(content)
+	var content string
+	switch e.format {
+	case FormatHTML:
+		stripAttributes(doc)
+		content, _ = contentSel.Html()
+		content = strings.TrimSpace(content)
+	case FormatMarkdown:
+		rawHTML, _ := contentSel.Html()
+		if md, mdErr := htmltomarkdown.ConvertString(rawHTML); mdErr == nil {
+			content = strings.TrimSpace(md)
+		}
+	default: // FormatText
+		content = contentSel.Text()
+		content = strings.TrimSpace(content)
+		content = reWhitespace.ReplaceAllString(content, " ")
+		content = cleanLines(content)
+	}
 
 	return &Result{
 		Title:   title,
 		Content: e.truncate(content),
+		Format:  e.format,
 	}, nil
 }
 
