@@ -106,10 +106,10 @@ func (p *Pipeline) Run(ctx context.Context, query string) (*SearchOutput, error)
 	// 2. Collect unique URLs.
 	urls := uniqueURLs(srcResults)
 
-	// 3. Fetch + extract content.
+	// 3. Fetch + extract + chunk + filter content.
 	contents := make(map[string]string, len(urls))
 	if p.fetchFn != nil && p.extractor != nil && len(urls) > 0 {
-		fetchResults := ParallelFetch(ctx, urls, p.buildFetchFn(), WithMaxConcurrency(p.maxConc))
+		fetchResults := ParallelFetch(ctx, urls, p.buildFetchFn(query), WithMaxConcurrency(p.maxConc))
 		for _, r := range fetchResults {
 			if r.Err == nil && r.Content != "" {
 				contents[r.URL] = r.Content
@@ -117,12 +117,7 @@ func (p *Pipeline) Run(ctx context.Context, query string) (*SearchOutput, error)
 		}
 	}
 
-	// 4. Chunk + filter (if configured).
-	if p.chunker != nil {
-		contents = p.chunkAndFilter(contents, query)
-	}
-
-	// 5. Summarize with LLM.
+	// 4. Summarize with LLM.
 	if p.llm != nil {
 		out, err := p.llm.Summarize(ctx, query, p.maxTokens, p.charsPerToken, srcResults, contents)
 		if err != nil {
@@ -135,9 +130,10 @@ func (p *Pipeline) Run(ctx context.Context, query string) (*SearchOutput, error)
 	return p.buildOutput(query, &llm.StructuredOutput{}, srcResults), nil
 }
 
-// buildFetchFn wraps p.fetchFn + p.extractor into the string-returning signature
-// expected by ParallelFetch.
-func (p *Pipeline) buildFetchFn() func(ctx context.Context, rawURL string) (string, error) {
+// buildFetchFn wraps p.fetchFn + p.extractor + optional chunk/filter into the
+// string-returning signature expected by ParallelFetch. Each goroutine performs
+// fetch → extract → chunk+filter → join, so no separate chunkAndFilter step is needed.
+func (p *Pipeline) buildFetchFn(query string) func(ctx context.Context, rawURL string) (string, error) {
 	return func(ctx context.Context, rawURL string) (string, error) {
 		body, err := p.fetchFn(ctx, rawURL)
 		if err != nil {
@@ -148,7 +144,21 @@ func (p *Pipeline) buildFetchFn() func(ctx context.Context, rawURL string) (stri
 		if err != nil {
 			return "", err
 		}
-		return result.Content, nil
+		content := result.Content
+
+		// Chunk + filter inline (if configured).
+		if p.chunker != nil {
+			chunks := p.chunker.Chunk(content)
+			if len(chunks) == 0 {
+				return "", nil
+			}
+			if p.filter != nil {
+				chunks = p.filter.Filter(chunks, query)
+			}
+			content = strings.Join(chunks, "\n\n")
+		}
+
+		return content, nil
 	}
 }
 
@@ -191,24 +201,6 @@ func (p *Pipeline) searchSources(ctx context.Context, query string) []sources.Re
 		all = append(all, out.results...)
 	}
 	return all
-}
-
-// chunkAndFilter applies the chunker and (optionally) the filter to each
-// extracted content entry. Returns a new map with chunked/filtered content
-// joined back to a single string per URL.
-func (p *Pipeline) chunkAndFilter(contents map[string]string, query string) map[string]string {
-	result := make(map[string]string, len(contents))
-	for u, content := range contents {
-		chunks := p.chunker.Chunk(content)
-		if len(chunks) == 0 {
-			continue
-		}
-		if p.filter != nil {
-			chunks = p.filter.Filter(chunks, query)
-		}
-		result[u] = strings.Join(chunks, "\n\n")
-	}
-	return result
 }
 
 // buildOutput assembles the SearchOutput from LLM output and source results.
