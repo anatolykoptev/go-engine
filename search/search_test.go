@@ -8,6 +8,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
+
+	"golang.org/x/time/rate"
 
 	"github.com/anatolykoptev/go-engine/fetch"
 	"github.com/anatolykoptev/go-engine/sources"
@@ -435,5 +438,57 @@ func defaultTestRetry() fetch.RetryConfig {
 		InitialWait: 0,
 		MaxWait:     0,
 		Multiplier:  1,
+	}
+}
+
+// --- Rate limiter tests ---
+
+func TestSearchDirect_RateLimiter(t *testing.T) {
+	htmlResponse := `<html><body>
+		<div class="result">
+			<a class="result__a" href="https://example.com/rl1">RL Result</a>
+			<span class="result__snippet">RL snippet.</span>
+		</div>
+	</body></html>`
+
+	bc := &mockBrowser{fn: func(_, _ string, _ map[string]string, _ io.Reader) ([]byte, map[string]string, int, error) {
+		return []byte(htmlResponse), nil, http.StatusOK, nil
+	}}
+
+	cfg := DirectConfig{
+		Browser:    bc,
+		DDG:        true,
+		Retry:      defaultTestRetry(),
+		DDGLimiter: rate.NewLimiter(1000, 100),
+	}
+
+	results := SearchDirect(context.Background(), cfg, "test", "en")
+	if len(results) == 0 {
+		t.Error("expected results with a permissive rate limiter, got none")
+	}
+}
+
+func TestSearchDirect_RateLimiterCancelled(t *testing.T) {
+	bc := &mockBrowser{fn: func(_, _ string, _ map[string]string, _ io.Reader) ([]byte, map[string]string, int, error) {
+		return []byte(`<html><body></body></html>`), nil, http.StatusOK, nil
+	}}
+
+	// Create a limiter with rate=1, burst=1, then drain the single token.
+	lim := rate.NewLimiter(1, 1)
+	lim.Reserve() // drain burst token
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond)
+	defer cancel()
+
+	cfg := DirectConfig{
+		Browser:    bc,
+		DDG:        true,
+		Retry:      defaultTestRetry(),
+		DDGLimiter: lim,
+	}
+
+	results := SearchDirect(ctx, cfg, "test", "en")
+	if len(results) != 0 {
+		t.Errorf("expected 0 results when rate limiter blocks and context cancels, got %d", len(results))
 	}
 }
