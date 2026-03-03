@@ -5,8 +5,9 @@ import (
 	"unicode/utf8"
 )
 
-// DefaultCharsPerToken is the average character-to-token ratio for English text.
-// Multilingual text may use ~2.5 chars/token.
+// DefaultCharsPerToken is the average bytes-per-token ratio for English text.
+// Estimation and truncation operate on byte length (not rune count).
+// Multilingual text (e.g., Cyrillic, CJK) may need ~2.5 bytes/token.
 const DefaultCharsPerToken = 3.5
 
 // EstimateTokens estimates the number of tokens in text using a character-based ratio.
