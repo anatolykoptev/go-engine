@@ -1,6 +1,6 @@
 # go-engine Roadmap
 
-> **Module:** `github.com/anatolykoptev/go-engine` | **Current:** v0.7.0 | **Updated:** 2026-03-03
+> **Module:** `github.com/anatolykoptev/go-engine` | **Current:** v1.1.0 | **Updated:** 2026-03-03
 
 **See also:** [ARCHITECTURE.md](ARCHITECTURE.md) | [COMPETITORS.md](COMPETITORS.md)
 
@@ -11,72 +11,36 @@
 | v0.1.0 | Scaffolding, text utilities, metrics | `text/`, `metrics/` |
 | v0.1.1 | Tiered cache (Memory L1 + Redis L2) | `cache/` |
 | v0.7.0 | HTTP fetch + proxy, content extraction, search engines, LLM client, pipeline | `fetch/`, `extract/`, `search/`, `llm/`, `pipeline/`, `sources/` (stub) |
+| v1.0.0 | Stable API: sources, strategy interfaces, pipeline orchestrator, singleflight cache | `sources/`, `extract/`, `text/`, `cache/`, `pipeline/` |
+| v1.1.0 | Search quality: unified Result, rate limit detection, WRR fusion, dedup, categories, markdown | `search/`, `sources/`, `llm/`, `pipeline/` |
 
-9 packages, all tests passing, Go 1.26, quality grade A (88/100).
+9 packages, 215 tests, benchmarks, Go 1.26. [v1.0.0 design](plans/2026-03-03-v1.0.0-design.md) | [v1.1.0 design](plans/2026-03-03-v1.1.0-design.md).
 
----
-
-## Next: v1.0.0 — Architecture Upgrade
-
-API freeze + composable framework. [Design doc](plans/2026-03-03-v1.0.0-design.md).
-
-**`sources/` — Source interface + API client:**
-- [ ] `Source` interface (`Name`, `Search`) + `Query`/`Result` types
-- [ ] `APIClient` — generic JSON API helper with auth, rate limit, retry
-- [ ] `AuthMethod` interface (`BearerAuth`, `NoAuthMethod`)
-
-**Strategy interfaces + implementations:**
-- [ ] `extract.Strategy` interface (existing `Extractor` satisfies it)
-- [ ] `text.Chunker` interface + `CharacterChunker` (split with overlap, UTF-8 safe)
-- [ ] `text.Filter` interface + `BM25Filter` (score chunks against query, return top-K)
-
-**Pipeline upgrade:**
-- [ ] `ParallelFetch` — bounded concurrency (semaphore), `[]FetchResult` with errors (breaking change)
-- [ ] `pipeline.Pipeline` — orchestrator: sources → fetch → extract → chunk → filter → llm
-
-**Cache:**
-- [ ] `Tiered.GetOrFetch` — singleflight wrapper to prevent thundering herd
-
-**Tests:**
-- [ ] Integration tests — cross-package pipeline with httptest + mocks
-- [ ] Benchmark tests — extract, cache, chunker, filter hot paths
+**v1.1.0 delivered:**
+- [x] Unified `sources.Result` everywhere (deleted `search.Result`)
+- [x] `ErrRateLimited` typed error + DDG captcha/403/429 detection
+- [x] Startpage rate limit detection (HTML markers + HTTP status)
+- [x] Per-engine `rate.Limiter` in `DirectConfig` (DDG, Startpage)
+- [x] `FuseWRR()` — Weighted Reciprocal Rank fusion (k=60, configurable weights)
+- [x] `DedupSnippets()` — BoW cosine similarity deduplication
+- [x] `SearXNG.SearchQuery()` — `sources.Query` with `Extra["categories"]` support
+- [x] `ResultsToMarkdown()` — numbered markdown for LLM consumption
 
 ---
 
-## v1.1.0 — Search Quality
-
-*Sources: [Djarvur/ddg-search](https://github.com/Djarvur/ddg-search), [LLM_Web_search](https://github.com/mamei16/LLM_Web_search), [karust/openserp](https://github.com/karust/openserp)*
-
-**Rate limiting & anti-detection:**
-- [ ] **DDG rate limit detection** — `IsRateLimitPage()`: check HTML for captcha/403 markers before parsing, avoid silent empty results. Djarvur checks body text for CAPTCHA patterns + HTTP 429/403 (`search/ddg.go`, ~30 LOC)
-- [ ] **Startpage rate limit detection** — same for Startpage: detect "rate limited" pages before parsing (`search/startpage.go`, ~20 LOC)
-- [ ] **crypto/rand jitter** — replace `math/rand` in retry delays with `crypto/rand` for unpredictable intervals. Djarvur uses `randomJitter()` via `crypto/rand.Read` + `binary.BigEndian` (`fetch/`, ~15 LOC)
-- [ ] **Per-engine rate limiter** — `rate.Limiter` per search engine to avoid hammering one source. openserp does this per-engine with `golang.org/x/time/rate` (`search/`, ~40 LOC)
-
-**Result quality:**
-- [ ] **WRR result fusion** — `WeightedReciprocalRank()`: when combining DDG + SearXNG + Startpage, rank by weighted reciprocal position instead of naive concat. LLM_Web_search has portable implementation at `retrieval.py:246` (`search/filter.go`, ~80 LOC)
-- [ ] **Snippet deduplication** — beyond URL dedup: BoW cosine on snippets to remove near-duplicates from different engines. LLM_Web_search has `bow_filter_similar_texts()` + `filter_similar_embeddings()` (`search/filter.go`, ~60 LOC)
-- [ ] **SearXNG categories** — pass `categories` param (general/news/science/it) for targeted search. LLM_Web_search passes categories in SearXNG params (`search/searxng.go`, ~10 LOC)
-- [ ] **Markdown output format** — `ResultsToMarkdown()`: format search results as numbered markdown for direct LLM consumption. Djarvur's `SearchMarkdown()` outputs `## [Title](URL)\nSnippet` format (`search/result.go`, ~30 LOC)
-
-## v1.2.0 — Pipeline Robustness
+## Next: v1.2.0 — Pipeline Robustness
 
 *Sources: [Firecrawl](https://github.com/firecrawl/firecrawl), [Haystack](https://github.com/deepset-ai/haystack), [GoClaw](https://github.com/nextlevelbuilder/goclaw), [Crawl4ai](https://github.com/unclecode/crawl4ai)*
 
-**ParallelFetch improvements:**
-- [ ] **Bounded concurrency** — `maxConcurrency` semaphore via `chan struct{}` to prevent target overload and IP bans. Firecrawl's `concurrency-queue-reconciler` guarantees N parallel scrapes max (`pipeline/`, ~15 LOC)
-- [ ] **Error propagation** — return `map[string]error` per-URL instead of silently skipping failures. Haystack has typed errors per component (`ComponentError`) (`pipeline/`, ~20 LOC)
+**Pipeline improvements:**
 - [ ] **Fetch + immediate chunk** — chunk content right after fetch in goroutine, not as separate step. LLM_Web_search's `async_fetch_chunk_websites()` does fetch→chunk in one pass (`pipeline/`, ~30 LOC)
+- [ ] **Auto-chunking detection** — only chunk if content > threshold. Crawl4ai's `_needs_chunking()` checks HTML size before splitting (`text/chunk.go`, ~15 LOC)
+- [ ] **Token budget truncation** — cut extracted content to fit model context window before LLM. llm-scraper's `preprocess()` reduces token usage 50-80% (`llm/` or `text/`, ~50 LOC)
 
 **Retry & observability:**
 - [ ] **Retry hooks** — `RetryHookFunc(ctx, attempt, err)` callback injected via context for logging/metrics on each retry. GoClaw's `retryHookFromContext()` pattern (`fetch/`, ~20 LOC)
 - [ ] **Retry with reset** — `retrySend(ctx, name, resetFn, fn)` — reset callback to clean up state before retry attempt. GoClaw's pattern at `internal/cron/retry.go:55` (`fetch/`, ~15 LOC)
 - [ ] **Per-URL retry tracker** — track retry state per URL across calls, avoid retrying permanently broken URLs. Firecrawl's `retryTracker` (`fetch/`, ~50 LOC)
-
-**Content processing:**
-- [ ] **Character chunking with overlap** — split large texts into chunks with configurable size + overlap for LLM. Crawl4ai has 4 strategies; start with character-based (`RecursiveCharacterTextSplitter` from LLM_Web_search) (new `text/chunk.go`, ~100 LOC)
-- [ ] **Auto-chunking detection** — only chunk if content > threshold. Crawl4ai's `_needs_chunking()` checks HTML size before splitting (`text/chunk.go`, ~15 LOC)
-- [ ] **Token budget truncation** — cut extracted content to fit model context window before LLM. llm-scraper's `preprocess()` reduces token usage 50-80% (`llm/` or `text/`, ~50 LOC)
 
 ## v1.3.0 — Extraction Quality
 
@@ -89,7 +53,6 @@ API freeze + composable framework. [Design doc](plans/2026-03-03-v1.0.0-design.m
 - [ ] **Content-type aware preprocessing** — detect content type (article, forum, docs, list) and use different extraction strategy per type. Crawl4ai's `markdown_generation_strategy.py` adjusts output by content shape (`extract/`, ~80 LOC)
 
 **Filtering & ranking:**
-- [ ] **BM25 content relevance filter** — score extracted chunks against user query, send only top-K to LLM. Crawl4ai's `content_filter_strategy.py` (1082 LOC) does BM25 + pruning; we need a lightweight Go port (`text/relevance.go`, ~200 LOC)
 - [ ] **Per-strategy retry** — retry individual extraction tiers, not the whole chain. Crawl4ai's `execute_with_retry()` wraps each strategy step (`extract/`, ~30 LOC)
 
 **LLM client:**
@@ -110,7 +73,6 @@ Not scheduled. Evaluate after v1.3.0 based on consumer needs.
 | Typed errors per package | Haystack | all | Medium | `SearchError`, `FetchError`, `ExtractError` instead of generic `error`; enables `errors.As` pattern in consumers |
 | Router component | Haystack | `pipeline/` | Medium | Conditional routing by content type, query domain, language — dispatch to different extraction/LLM chains |
 | Pipeline-level cache | Haystack | `pipeline/` | Low | Cache checker before processing: skip fetch+extract if cached result exists for query |
-| Strategy pattern for extraction | Crawl4ai | `extract/` | Medium | `ExtractionStrategy` interface → swap implementations (rule-based, LLM, hybrid) per call |
 
 **Search & sources:**
 
@@ -153,7 +115,7 @@ Not scheduled. Evaluate after v1.3.0 based on consumer needs.
 | v0.1.0 | Scaffolding + text/metrics |
 | v0.1.1 | Cache |
 | v0.7.0 | All core packages |
-| **v1.0.0** | **Stable API, sources, tests, docs** |
-| v1.1.0 | Search quality (8 items) |
-| v1.2.0 | Pipeline robustness (12 items) |
-| v1.3.0 | Extraction quality (8 items) |
+| v1.0.0 | Stable API, sources, strategy interfaces, pipeline orchestrator, 194 tests |
+| **v1.1.0** | **Search quality: unified Result, rate limits, WRR fusion, dedup, categories, markdown — 215 tests** |
+| v1.2.0 | Pipeline robustness (6 items) |
+| v1.3.0 | Extraction quality (7 items) |
