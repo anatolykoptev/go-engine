@@ -194,6 +194,33 @@ func TestExtractor_InvalidHTML(t *testing.T) {
 	}
 }
 
+const hiddenElementsHTML = `<html>
+<head><title>Hidden Test</title></head>
+<body>
+<div aria-hidden="true">Screen reader hidden</div>
+<div hidden>HTML5 hidden</div>
+<div class="cookie-banner">Accept cookies</div>
+<div class="social-share">Share this</div>
+<p>Visible content here</p>
+</body>
+</html>`
+
+func TestExtractor_GoqueryStripsHiddenElements(t *testing.T) {
+	ext := New()
+	result, err := ext.extractGoquery([]byte(hiddenElementsHTML))
+	if err != nil {
+		t.Fatalf("extractGoquery: %v", err)
+	}
+	for _, unwanted := range []string{"Screen reader hidden", "HTML5 hidden", "cookie", "Share this"} {
+		if strings.Contains(result.Content, unwanted) {
+			t.Errorf("content should not contain %q", unwanted)
+		}
+	}
+	if !strings.Contains(result.Content, "Visible content") {
+		t.Error("visible content should be preserved")
+	}
+}
+
 func TestExtractor_ImplementsStrategy(t *testing.T) {
 	var _ Strategy = New()
 }

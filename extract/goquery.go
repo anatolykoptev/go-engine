@@ -12,11 +12,18 @@ var reWhitespace = regexp.MustCompile(`\s+`)
 
 // removeSelectors are HTML elements stripped before text extraction.
 var removeSelectors = strings.Join([]string{
+	// Standard boilerplate.
 	"script", "style", "noscript", "iframe", "svg",
 	"header", "footer", "nav", "aside",
+	// Ads and non-content.
 	".advertisement", ".ad", ".sidebar", ".comments",
+	".cookie-banner", ".popup", ".modal", ".newsletter-signup",
+	".social-share", ".share-buttons",
+	// ARIA and HTML5 hidden.
 	"[role=navigation]", "[role=banner]", "[role=contentinfo]",
+	"[aria-hidden=true]", "[hidden]",
 }, ", ")
+
 
 // contentSelectors are tried in order to find the main content element.
 const contentSelectors = "article, main, .content, .post-content, .article-content, #content"
