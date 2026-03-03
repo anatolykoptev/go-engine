@@ -4,7 +4,7 @@ package pipeline
 
 import (
 	"github.com/anatolykoptev/go-engine/llm"
-	"github.com/anatolykoptev/go-engine/search"
+	"github.com/anatolykoptev/go-engine/sources"
 )
 
 // SourceItem represents a single search result source in the output.
@@ -54,7 +54,7 @@ func FormatOutput(out SearchOutput, opts OutputOpts) SearchOutput {
 }
 
 // BuildSearchOutput constructs SearchOutput from LLM results and search results.
-func BuildSearchOutput(query string, llmOut *llm.StructuredOutput, results []search.Result) SearchOutput {
+func BuildSearchOutput(query string, llmOut *llm.StructuredOutput, results []sources.Result) SearchOutput {
 	output := SearchOutput{
 		Query:  query,
 		Answer: llmOut.Answer,

@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/anatolykoptev/go-engine/llm"
-	"github.com/anatolykoptev/go-engine/search"
+	"github.com/anatolykoptev/go-engine/sources"
 )
 
 func TestFormatOutput_TruncateAnswer(t *testing.T) {
@@ -64,7 +64,7 @@ func TestBuildSearchOutput(t *testing.T) {
 		Answer: "Test answer",
 		Facts:  []llm.FactItem{{Point: "Fact1", Sources: []int{1}}},
 	}
-	results := []search.Result{
+	results := []sources.Result{
 		{Title: "T1", URL: "http://a.com", Content: "c1"},
 		{Title: "T2", URL: "http://b.com", Content: "c2"},
 	}

@@ -105,8 +105,7 @@ func (p *Pipeline) Run(ctx context.Context, query string) (*SearchOutput, error)
 
 	// 5. Summarize with LLM.
 	if p.llm != nil {
-		searchResults := toSearchResults(srcResults)
-		out, err := p.llm.Summarize(ctx, query, contentLimitChars, searchResults, contents)
+		out, err := p.llm.Summarize(ctx, query, contentLimitChars, srcResults, contents)
 		if err != nil {
 			return nil, err
 		}
@@ -197,6 +196,6 @@ func (p *Pipeline) chunkAndFilter(contents map[string]string, query string) map[
 
 // buildOutput assembles the SearchOutput from LLM output and source results.
 func (p *Pipeline) buildOutput(query string, out *llm.StructuredOutput, srcResults []sources.Result) *SearchOutput {
-	searchOut := BuildSearchOutput(query, out, toSearchResults(srcResults))
+	searchOut := BuildSearchOutput(query, out, srcResults)
 	return &searchOut
 }

@@ -13,6 +13,7 @@ import (
 	"github.com/PuerkitoBio/goquery"
 	"github.com/anatolykoptev/go-engine/fetch"
 	"github.com/anatolykoptev/go-engine/metrics"
+	"github.com/anatolykoptev/go-engine/sources"
 	"github.com/anatolykoptev/go-engine/text"
 )
 
@@ -38,7 +39,7 @@ type ddgResult struct {
 
 // SearchDDGDirect queries DuckDuckGo directly using browser TLS fingerprint.
 // Uses the HTML lite endpoint as primary, falls back to d.js JSON API.
-func SearchDDGDirect(ctx context.Context, bc BrowserDoer, query, region string, m *metrics.Registry) ([]Result, error) {
+func SearchDDGDirect(ctx context.Context, bc BrowserDoer, query, region string, m *metrics.Registry) ([]sources.Result, error) {
 	if region == "" {
 		region = "wt-wt"
 	}
@@ -71,7 +72,7 @@ func SearchDDGDirect(ctx context.Context, bc BrowserDoer, query, region string, 
 	return results, nil
 }
 
-func ddgSearchHTML(ctx context.Context, bc BrowserDoer, query, region string) ([]Result, error) {
+func ddgSearchHTML(ctx context.Context, bc BrowserDoer, query, region string) ([]sources.Result, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -94,13 +95,13 @@ func ddgSearchHTML(ctx context.Context, bc BrowserDoer, query, region string) ([
 }
 
 // ParseDDGHTML extracts search results from DDG HTML lite response.
-func ParseDDGHTML(data []byte) ([]Result, error) {
+func ParseDDGHTML(data []byte) ([]sources.Result, error) {
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(data)))
 	if err != nil {
 		return nil, fmt.Errorf("goquery parse: %w", err)
 	}
 
-	var results []Result
+	var results []sources.Result
 
 	doc.Find(".result, .web-result").Each(func(_ int, s *goquery.Selection) {
 		link := s.Find("a.result__a, .result__title a, a.result-link").First()
@@ -118,11 +119,12 @@ func ParseDDGHTML(data []byte) ([]Result, error) {
 		snippet := s.Find(".result__snippet, .result__body").First()
 		content := strings.TrimSpace(snippet.Text())
 
-		results = append(results, Result{
-			Title:   title,
-			Content: content,
-			URL:     href,
-			Score:   directResultScore,
+		results = append(results, sources.Result{
+			Title:    title,
+			Content:  content,
+			URL:      href,
+			Score:    directResultScore,
+			Metadata: map[string]string{"engine": "ddg"},
 		})
 	})
 
@@ -173,7 +175,7 @@ func ddgGetVQD(ctx context.Context, bc BrowserDoer, query string) (string, error
 	return "", fmt.Errorf("vqd token not found in response (%d bytes)", len(data))
 }
 
-func ddgSearchDJS(ctx context.Context, bc BrowserDoer, query, vqd, region string) ([]Result, error) {
+func ddgSearchDJS(ctx context.Context, bc BrowserDoer, query, vqd, region string) ([]sources.Result, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -205,7 +207,7 @@ func ddgSearchDJS(ctx context.Context, bc BrowserDoer, query, vqd, region string
 
 // ParseDDGResponse extracts search results from DDG d.js response.
 // The response may be JSONP or raw JSON array.
-func ParseDDGResponse(data []byte) ([]Result, error) {
+func ParseDDGResponse(data []byte) ([]sources.Result, error) {
 	body := strings.TrimSpace(string(data))
 
 	// Strip JSONP wrapper if present: DDGjsonp_xxx({results:[...]})
@@ -221,7 +223,7 @@ func ParseDDGResponse(data []byte) ([]Result, error) {
 		return nil, fmt.Errorf("ddg json parse: %w (first %d bytes: %s)", err, ddgDJSTruncateLen, text.Truncate(body, ddgDJSTruncateLen))
 	}
 
-	var results []Result
+	var results []sources.Result
 	for _, r := range raw {
 		resultURL := r.U
 		if resultURL == "" {
@@ -234,11 +236,12 @@ func ParseDDGResponse(data []byte) ([]Result, error) {
 		if strings.HasPrefix(resultURL, "https://duckduckgo.com/") {
 			continue
 		}
-		results = append(results, Result{
-			Title:   text.CleanHTML(r.T),
-			Content: text.CleanHTML(r.A),
-			URL:     resultURL,
-			Score:   directResultScore,
+		results = append(results, sources.Result{
+			Title:    text.CleanHTML(r.T),
+			Content:  text.CleanHTML(r.A),
+			URL:      resultURL,
+			Score:    directResultScore,
+			Metadata: map[string]string{"engine": "ddg"},
 		})
 	}
 

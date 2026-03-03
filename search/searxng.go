@@ -8,9 +8,15 @@ import (
 
 	"github.com/anatolykoptev/go-engine/fetch"
 	"github.com/anatolykoptev/go-engine/metrics"
+	"github.com/anatolykoptev/go-engine/sources"
 )
 
 const metricSearchRequests = "search_requests"
+
+// searxngResponse is the JSON response from SearXNG API.
+type searxngResponse struct {
+	Results []sources.Result `json:"results"`
+}
 
 // SearXNG queries a local SearXNG instance for search results.
 type SearXNG struct {
@@ -45,7 +51,7 @@ func NewSearXNG(baseURL string, opts ...SearXNGOption) *SearXNG {
 }
 
 // Search queries SearXNG and returns results.
-func (s *SearXNG) Search(ctx context.Context, query, language, timeRange, engines string) ([]Result, error) {
+func (s *SearXNG) Search(ctx context.Context, query, language, timeRange, engines string) ([]sources.Result, error) {
 	u, err := url.Parse(s.baseURL + "/search")
 	if err != nil {
 		return nil, err

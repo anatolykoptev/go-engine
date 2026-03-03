@@ -1,10 +1,14 @@
 package search
 
-import "net/url"
+import (
+	"net/url"
+
+	"github.com/anatolykoptev/go-engine/sources"
+)
 
 // FilterByScore removes results below minScore, keeping at least minKeep.
-func FilterByScore(results []Result, minScore float64, minKeep int) []Result {
-	var out []Result
+func FilterByScore(results []sources.Result, minScore float64, minKeep int) []sources.Result {
+	var out []sources.Result
 	for _, r := range results {
 		if r.Score >= minScore {
 			out = append(out, r)
@@ -20,9 +24,9 @@ func FilterByScore(results []Result, minScore float64, minKeep int) []Result {
 }
 
 // DedupByDomain limits results to maxPerDomain per domain.
-func DedupByDomain(results []Result, maxPerDomain int) []Result {
+func DedupByDomain(results []sources.Result, maxPerDomain int) []sources.Result {
 	counts := make(map[string]int)
-	var out []Result
+	var out []sources.Result
 	for _, r := range results {
 		u, err := url.Parse(r.URL)
 		if err != nil {

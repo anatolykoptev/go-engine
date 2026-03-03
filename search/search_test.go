@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/anatolykoptev/go-engine/fetch"
+	"github.com/anatolykoptev/go-engine/sources"
 )
 
 // mockBrowser implements BrowserDoer for testing.
@@ -39,7 +40,7 @@ func TestSearXNG_Search(t *testing.T) {
 		}
 
 		resp := searxngResponse{
-			Results: []Result{
+			Results: []sources.Result{
 				{Title: "Result 1", Content: "Content 1", URL: "https://example.com/1", Score: 0.9},
 				{Title: "Result 2", Content: "Content 2", URL: "https://example.com/2", Score: 0.5},
 			},
@@ -106,7 +107,7 @@ func TestSearXNG_SearchSkipsAllLanguage(t *testing.T) {
 // --- Filter tests ---
 
 func TestFilterByScore(t *testing.T) {
-	results := []Result{
+	results := []sources.Result{
 		{Title: "A", Score: 0.9},
 		{Title: "B", Score: 0.5},
 		{Title: "C", Score: 0.3},
@@ -123,7 +124,7 @@ func TestFilterByScore(t *testing.T) {
 }
 
 func TestFilterByScore_MinKeep(t *testing.T) {
-	results := []Result{
+	results := []sources.Result{
 		{Title: "A", Score: 0.1},
 		{Title: "B", Score: 0.2},
 		{Title: "C", Score: 0.05},
@@ -137,7 +138,7 @@ func TestFilterByScore_MinKeep(t *testing.T) {
 }
 
 func TestFilterByScore_MinKeepExceedsResults(t *testing.T) {
-	results := []Result{
+	results := []sources.Result{
 		{Title: "A", Score: 0.1},
 	}
 
@@ -149,7 +150,7 @@ func TestFilterByScore_MinKeepExceedsResults(t *testing.T) {
 }
 
 func TestDedupByDomain(t *testing.T) {
-	results := []Result{
+	results := []sources.Result{
 		{Title: "A1", URL: "https://example.com/page1"},
 		{Title: "A2", URL: "https://example.com/page2"},
 		{Title: "A3", URL: "https://example.com/page3"},
@@ -167,7 +168,7 @@ func TestDedupByDomain(t *testing.T) {
 }
 
 func TestDedupByDomain_InvalidURL(t *testing.T) {
-	results := []Result{
+	results := []sources.Result{
 		{Title: "A", URL: "https://valid.com/page"},
 		{Title: "B", URL: "://invalid"},
 		{Title: "C", URL: "https://valid.com/page2"},

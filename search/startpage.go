@@ -11,13 +11,14 @@ import (
 	"github.com/PuerkitoBio/goquery"
 	"github.com/anatolykoptev/go-engine/fetch"
 	"github.com/anatolykoptev/go-engine/metrics"
+	"github.com/anatolykoptev/go-engine/sources"
 )
 
 const metricStartpageRequests = "startpage_requests"
 
 // SearchStartpageDirect queries Startpage directly using browser TLS fingerprint.
 // Returns results compatible with the SearXNG pipeline.
-func SearchStartpageDirect(ctx context.Context, bc BrowserDoer, query, language string, m *metrics.Registry) ([]Result, error) {
+func SearchStartpageDirect(ctx context.Context, bc BrowserDoer, query, language string, m *metrics.Registry) ([]sources.Result, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -55,13 +56,13 @@ func SearchStartpageDirect(ctx context.Context, bc BrowserDoer, query, language 
 }
 
 // ParseStartpageHTML extracts search results from Startpage HTML response.
-func ParseStartpageHTML(data []byte) ([]Result, error) {
+func ParseStartpageHTML(data []byte) ([]sources.Result, error) {
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(data)))
 	if err != nil {
 		return nil, fmt.Errorf("goquery parse: %w", err)
 	}
 
-	var results []Result
+	var results []sources.Result
 
 	// Startpage result blocks: <div class="w-gl__result"> or <div class="result">
 	doc.Find(".w-gl__result, .result").Each(func(_ int, s *goquery.Selection) {
@@ -82,11 +83,12 @@ func ParseStartpageHTML(data []byte) ([]Result, error) {
 			return
 		}
 
-		results = append(results, Result{
-			Title:   title,
-			Content: content,
-			URL:     href,
-			Score:   directResultScore,
+		results = append(results, sources.Result{
+			Title:    title,
+			Content:  content,
+			URL:      href,
+			Score:    directResultScore,
+			Metadata: map[string]string{"engine": "startpage"},
 		})
 	})
 

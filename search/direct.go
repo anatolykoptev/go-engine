@@ -2,12 +2,20 @@ package search
 
 import (
 	"context"
+	"io"
 	"log/slog"
 	"sync"
 
 	"github.com/anatolykoptev/go-engine/fetch"
 	"github.com/anatolykoptev/go-engine/metrics"
+	"github.com/anatolykoptev/go-engine/sources"
 )
+
+// BrowserDoer performs HTTP requests with browser-like TLS fingerprint.
+// *stealth.BrowserClient satisfies this interface.
+type BrowserDoer interface {
+	Do(method, url string, headers map[string]string, body io.Reader) ([]byte, map[string]string, int, error)
+}
 
 // DirectConfig controls the SearchDirect fan-out behavior.
 type DirectConfig struct {
@@ -20,20 +28,20 @@ type DirectConfig struct {
 
 // SearchDirect queries enabled direct scrapers in parallel.
 // Returns merged results from all direct sources. Failures are non-fatal.
-func SearchDirect(ctx context.Context, cfg DirectConfig, query, language string) []Result {
+func SearchDirect(ctx context.Context, cfg DirectConfig, query, language string) []sources.Result {
 	if cfg.Browser == nil {
 		return nil
 	}
 
 	var wg sync.WaitGroup
 	var mu sync.Mutex
-	var all []Result
+	var all []sources.Result
 
 	if cfg.DDG {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			results, err := fetch.RetryDo(ctx, cfg.Retry, func() ([]Result, error) {
+			results, err := fetch.RetryDo(ctx, cfg.Retry, func() ([]sources.Result, error) {
 				return SearchDDGDirect(ctx, cfg.Browser, query, "wt-wt", cfg.Metrics)
 			})
 			if err != nil {
@@ -51,7 +59,7 @@ func SearchDirect(ctx context.Context, cfg DirectConfig, query, language string)
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			results, err := fetch.RetryDo(ctx, cfg.Retry, func() ([]Result, error) {
+			results, err := fetch.RetryDo(ctx, cfg.Retry, func() ([]sources.Result, error) {
 				return SearchStartpageDirect(ctx, cfg.Browser, query, language, cfg.Metrics)
 			})
 			if err != nil {

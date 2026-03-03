@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anatolykoptev/go-engine/search"
+	"github.com/anatolykoptev/go-engine/sources"
 )
 
 // mockResponse is a local OpenAI-compatible response for test servers.
@@ -196,7 +196,7 @@ func TestExpandSearchQueries_TruncatesToN(t *testing.T) {
 }
 
 func TestBuildSourcesText_Snippets(t *testing.T) {
-	results := []search.Result{
+	results := []sources.Result{
 		{Title: "Title1", URL: "http://a.com", Content: "snippet1"},
 		{Title: "Title2", URL: "http://b.com", Content: "snippet2"},
 	}
@@ -210,7 +210,7 @@ func TestBuildSourcesText_Snippets(t *testing.T) {
 }
 
 func TestBuildSourcesText_WithContents(t *testing.T) {
-	results := []search.Result{
+	results := []sources.Result{
 		{Title: "Title1", URL: "http://a.com", Content: "snippet1"},
 	}
 	contents := map[string]string{"http://a.com": "full content here"}
@@ -224,7 +224,7 @@ func TestBuildSourcesText_WithContents(t *testing.T) {
 }
 
 func TestBuildSourcesText_TruncatesContent(t *testing.T) {
-	results := []search.Result{
+	results := []sources.Result{
 		{Title: "T", URL: "http://a.com"},
 	}
 	contents := map[string]string{"http://a.com": "abcdefghij"}
@@ -240,7 +240,7 @@ func TestSummarizeWithInstruction(t *testing.T) {
 	defer srv.Close()
 
 	c := New(WithAPIBase(srv.URL), WithAPIKey("key"), WithModel("test"))
-	results := []search.Result{{Title: "T", URL: "http://a.com", Content: "c"}}
+	results := []sources.Result{{Title: "T", URL: "http://a.com", Content: "c"}}
 	got, err := c.SummarizeWithInstruction(context.Background(), "q", "instr", 1000, results, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -259,7 +259,7 @@ func TestSummarizeDeep(t *testing.T) {
 	defer srv.Close()
 
 	c := New(WithAPIBase(srv.URL), WithAPIKey("key"), WithModel("test"))
-	results := []search.Result{{Title: "T", URL: "http://a.com", Content: "c"}}
+	results := []sources.Result{{Title: "T", URL: "http://a.com", Content: "c"}}
 	got, err := c.SummarizeDeep(context.Background(), "q", "instr", 1000, results, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -296,7 +296,7 @@ func TestSummarizeToJSON(t *testing.T) {
 	defer srv.Close()
 
 	c := New(WithAPIBase(srv.URL), WithAPIKey("key"), WithModel("test"))
-	results := []search.Result{{Title: "T", URL: "http://a.com"}}
+	results := []sources.Result{{Title: "T", URL: "http://a.com"}}
 	got, raw, err := SummarizeToJSON[custom](context.Background(), c, "q", "instr", 1000, results, nil)
 	if err != nil {
 		t.Fatal(err)
