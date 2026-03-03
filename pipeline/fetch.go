@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"fmt"
 	"sync"
 )
 
@@ -55,6 +56,11 @@ func ParallelFetch(ctx context.Context, urls []string,
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
+			defer func() {
+				if r := recover(); r != nil {
+					results[idx] = FetchResult{URL: url, Err: fmt.Errorf("panic: %v", r)}
+				}
+			}()
 			content, err := fetchFn(ctx, url)
 			results[idx] = FetchResult{URL: url, Content: content, Err: err}
 		}(i, u)
