@@ -93,3 +93,38 @@ func TestCharacterChunker_SingleLongWord(t *testing.T) {
 		t.Errorf("reassembled = %q, want %q", joined, input)
 	}
 }
+
+func TestCharacterChunker_NeedsChunking_Short(t *testing.T) {
+	c := NewCharacterChunker(100, 20)
+	if c.NeedsChunking("short text") {
+		t.Error("short text should not need chunking")
+	}
+}
+
+func TestCharacterChunker_NeedsChunking_Long(t *testing.T) {
+	c := NewCharacterChunker(10, 0)
+	if !c.NeedsChunking("this is definitely longer than ten runes") {
+		t.Error("long text should need chunking")
+	}
+}
+
+func TestCharacterChunker_NeedsChunking_ExactSize(t *testing.T) {
+	c := NewCharacterChunker(10, 0)
+	if c.NeedsChunking("0123456789") {
+		t.Error("text exactly at chunkSize should not need chunking")
+	}
+}
+
+func TestCharacterChunker_NeedsChunking_Empty(t *testing.T) {
+	c := NewCharacterChunker(100, 0)
+	if c.NeedsChunking("") {
+		t.Error("empty text should not need chunking")
+	}
+}
+
+func TestCharacterChunker_NeedsChunking_UTF8(t *testing.T) {
+	c := NewCharacterChunker(5, 0)
+	if !c.NeedsChunking("Привет") { // 6 Cyrillic runes > 5
+		t.Error("6 Cyrillic runes should need chunking with chunkSize=5")
+	}
+}

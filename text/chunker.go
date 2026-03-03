@@ -1,6 +1,9 @@
 package text
 
-import "strings"
+import (
+	"strings"
+	"unicode/utf8"
+)
 
 // Chunker splits text into overlapping chunks.
 type Chunker interface {
@@ -47,6 +50,12 @@ func (c *CharacterChunker) Chunk(text string) []string {
 		pos = next
 	}
 	return chunks
+}
+
+// NeedsChunking reports whether text is long enough to produce multiple chunks.
+// Use before Chunk() to skip processing for short content.
+func (c *CharacterChunker) NeedsChunking(text string) bool {
+	return utf8.RuneCountInString(text) > c.chunkSize
 }
 
 // nextChunk returns the next chunk string and the position to continue from.
