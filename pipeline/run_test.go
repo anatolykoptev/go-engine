@@ -218,6 +218,48 @@ func TestPipeline_EmptyResults(t *testing.T) {
 	}
 }
 
+func TestPipeline_ExtractorWithLLMFallback(t *testing.T) {
+	var fallbackCalled bool
+	fallbackFn := func(_ context.Context, _ string) (string, error) {
+		fallbackCalled = true
+		return "LLM extracted content from pipeline", nil
+	}
+
+	// Content server serves thin HTML (below minExtractChars threshold).
+	contentSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte(`<html><body><p>Hi</p></body></html>`))
+	}))
+	defer contentSrv.Close()
+
+	src := &mockSource{
+		name: "test",
+		results: []sources.Result{
+			{Title: "Thin Page", URL: contentSrv.URL, Content: "Hi"},
+		},
+	}
+
+	ext := extract.New(
+		extract.WithLLMFallback(fallbackFn),
+		extract.WithMinExtractChars(1000), // force fallback
+	)
+
+	p := NewPipeline(
+		WithSources(src),
+		WithFetchFunc(stdFetchFn),
+		WithExtractor(ext),
+	)
+
+	out, err := p.Run(context.Background(), "test query")
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if !fallbackCalled {
+		t.Error("LLM fallback should have been called through pipeline")
+	}
+	_ = out
+}
+
 func TestNewPipeline_Defaults(t *testing.T) {
 	p := NewPipeline()
 	if p.maxConc != defaultMaxConcurrency {
