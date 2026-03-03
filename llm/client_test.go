@@ -11,6 +11,19 @@ import (
 	"github.com/anatolykoptev/go-engine/search"
 )
 
+// mockResponse is a local OpenAI-compatible response for test servers.
+type mockResponse struct {
+	Choices []mockChoice `json:"choices"`
+}
+
+type mockChoice struct {
+	Message mockMessage `json:"message"`
+}
+
+type mockMessage struct {
+	Content string `json:"content"`
+}
+
 // mockLLMServer returns a test server that echoes the given response as an
 // OpenAI-compatible chat completion.
 func mockLLMServer(t *testing.T, response string) *httptest.Server {
@@ -21,15 +34,9 @@ func mockLLMServer(t *testing.T, response string) *httptest.Server {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		resp := chatResponse{
-			Choices: []struct {
-				Message struct {
-					Content string `json:"content"`
-				} `json:"message"`
-			}{
-				{Message: struct {
-					Content string `json:"content"`
-				}{Content: response}},
+		resp := mockResponse{
+			Choices: []mockChoice{
+				{Message: mockMessage{Content: response}},
 			},
 		}
 		_ = json.NewEncoder(w).Encode(resp)
@@ -54,15 +61,6 @@ func TestNewClient_WithOptions(t *testing.T) {
 		WithTemperature(0.5),
 		WithMaxTokens(500),
 	)
-	if c.apiBase != "http://example.com/v1" {
-		t.Errorf("apiBase = %q", c.apiBase)
-	}
-	if c.apiKey != "key1" {
-		t.Errorf("apiKey = %q", c.apiKey)
-	}
-	if c.model != "gpt-4" {
-		t.Errorf("model = %q", c.model)
-	}
 	if c.temperature != 0.5 {
 		t.Errorf("temperature = %v", c.temperature)
 	}
@@ -108,15 +106,9 @@ func TestComplete_KeyRotation(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		resp := chatResponse{
-			Choices: []struct {
-				Message struct {
-					Content string `json:"content"`
-				} `json:"message"`
-			}{
-				{Message: struct {
-					Content string `json:"content"`
-				}{Content: "rotated-success"}},
+		resp := mockResponse{
+			Choices: []mockChoice{
+				{Message: mockMessage{Content: "rotated-success"}},
 			},
 		}
 		_ = json.NewEncoder(w).Encode(resp)

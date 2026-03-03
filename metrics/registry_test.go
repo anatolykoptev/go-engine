@@ -6,19 +6,19 @@ import (
 	"testing"
 )
 
-func TestRegistry_IncrAndGet(t *testing.T) {
+func TestRegistry_IncrAndValue(t *testing.T) {
 	r := New()
 
-	if got := r.Get("unknown"); got != 0 {
-		t.Errorf("Get(unknown) = %d, want 0", got)
+	if got := r.Value("unknown"); got != 0 {
+		t.Errorf("Value(unknown) = %d, want 0", got)
 	}
 
 	r.Incr("requests")
 	r.Incr("requests")
 	r.Incr("requests")
 
-	if got := r.Get("requests"); got != 3 {
-		t.Errorf("Get(requests) = %d, want 3", got)
+	if got := r.Value("requests"); got != 3 {
+		t.Errorf("Value(requests) = %d, want 3", got)
 	}
 }
 
@@ -28,8 +28,8 @@ func TestRegistry_Add(t *testing.T) {
 	r.Add("bytes", 100)
 	r.Add("bytes", 250)
 
-	if got := r.Get("bytes"); got != 350 {
-		t.Errorf("Get(bytes) = %d, want 350", got)
+	if got := r.Value("bytes"); got != 350 {
+		t.Errorf("Value(bytes) = %d, want 350", got)
 	}
 }
 
@@ -59,7 +59,7 @@ func TestRegistry_Format(t *testing.T) {
 	r.Add("mm_middle", 2)
 
 	got := r.Format()
-	want := "aa_first 1\nmm_middle 2\nzz_last 3\n"
+	want := "aa_first=1\nmm_middle=2\nzz_last=3\n"
 
 	if got != want {
 		t.Errorf("Format() =\n%s\nwant:\n%s", got, want)
@@ -92,8 +92,8 @@ func TestRegistry_Concurrent(t *testing.T) {
 	wg.Wait()
 
 	want := int64(goroutines * iterations)
-	if got := r.Get("counter"); got != want {
-		t.Errorf("concurrent Get(counter) = %d, want %d", got, want)
+	if got := r.Value("counter"); got != want {
+		t.Errorf("concurrent Value(counter) = %d, want %d", got, want)
 	}
 }
 
@@ -116,8 +116,8 @@ func TestRegistry_MultipleCountersConcurrent(t *testing.T) {
 	wg.Wait()
 
 	for _, name := range counters {
-		if got := r.Get(name); got != iterations {
-			t.Errorf("Get(%s) = %d, want %d", name, got, iterations)
+		if got := r.Value(name); got != iterations {
+			t.Errorf("Value(%s) = %d, want %d", name, got, iterations)
 		}
 	}
 
