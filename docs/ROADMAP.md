@@ -1,6 +1,6 @@
 # go-engine Roadmap
 
-> **Module:** `github.com/anatolykoptev/go-engine` | **Current:** v1.1.0 | **Updated:** 2026-03-03
+> **Module:** `github.com/anatolykoptev/go-engine` | **Current:** v1.2.0 | **Updated:** 2026-03-03
 
 **See also:** [ARCHITECTURE.md](ARCHITECTURE.md) | [COMPETITORS.md](COMPETITORS.md)
 
@@ -13,36 +13,22 @@
 | v0.7.0 | HTTP fetch + proxy, content extraction, search engines, LLM client, pipeline | `fetch/`, `extract/`, `search/`, `llm/`, `pipeline/`, `sources/` (stub) |
 | v1.0.0 | Stable API: sources, strategy interfaces, pipeline orchestrator, singleflight cache | `sources/`, `extract/`, `text/`, `cache/`, `pipeline/` |
 | v1.1.0 | Search quality: unified Result, rate limit detection, WRR fusion, dedup, categories, markdown | `search/`, `sources/`, `llm/`, `pipeline/` |
+| v1.2.0 | Pipeline robustness: fetch+chunk, auto-chunking, token budget, retry hooks/reset/tracker | `text/`, `llm/`, `pipeline/`, `fetch/` |
 
-9 packages, 215 tests, benchmarks, Go 1.26. [v1.0.0 design](plans/2026-03-03-v1.0.0-design.md) | [v1.1.0 design](plans/2026-03-03-v1.1.0-design.md).
+9 packages, 264 tests, benchmarks, Go 1.26. [v1.0.0 design](plans/2026-03-03-v1.0.0-design.md) | [v1.1.0 design](plans/2026-03-03-v1.1.0-design.md).
 
-**v1.1.0 delivered:**
-- [x] Unified `sources.Result` everywhere (deleted `search.Result`)
-- [x] `ErrRateLimited` typed error + DDG captcha/403/429 detection
-- [x] Startpage rate limit detection (HTML markers + HTTP status)
-- [x] Per-engine `rate.Limiter` in `DirectConfig` (DDG, Startpage)
-- [x] `FuseWRR()` — Weighted Reciprocal Rank fusion (k=60, configurable weights)
-- [x] `DedupSnippets()` — BoW cosine similarity deduplication
-- [x] `SearXNG.SearchQuery()` — `sources.Query` with `Extra["categories"]` support
-- [x] `ResultsToMarkdown()` — numbered markdown for LLM consumption
+**v1.2.0 delivered:**
+- [x] **Fetch + immediate chunk** — merged chunk+filter into buildFetchFn goroutine (`pipeline/run.go`)
+- [x] **Auto-chunking detection** — `NeedsChunking()` method on CharacterChunker (`text/chunker.go`)
+- [x] **Token budget truncation** — `EstimateTokens()`, `TruncateToTokenBudget()` with configurable chars/token (`text/token.go`)
+- [x] **LLM token budget** — changed all `Summarize` signatures from contentLimit to maxTokens+charsPerToken (`llm/summarize.go`)
+- [x] **Retry hooks** — `RetryHookFunc` context-injected callback (go-stealth v1.3.0, re-exported in `fetch/`)
+- [x] **Retry with reset** — `RetryDoWithReset`, `RetryHTTPWithReset` (go-stealth v1.3.0)
+- [x] **Per-URL retry tracker** — `RetryTracker` with TTL eviction and permanent failure detection (go-stealth v1.3.0, integrated in `fetch/`)
 
 ---
 
-## Next: v1.2.0 — Pipeline Robustness
-
-*Sources: [Firecrawl](https://github.com/firecrawl/firecrawl), [Haystack](https://github.com/deepset-ai/haystack), [GoClaw](https://github.com/nextlevelbuilder/goclaw), [Crawl4ai](https://github.com/unclecode/crawl4ai)*
-
-**Pipeline improvements:**
-- [ ] **Fetch + immediate chunk** — chunk content right after fetch in goroutine, not as separate step. LLM_Web_search's `async_fetch_chunk_websites()` does fetch→chunk in one pass (`pipeline/`, ~30 LOC)
-- [ ] **Auto-chunking detection** — only chunk if content > threshold. Crawl4ai's `_needs_chunking()` checks HTML size before splitting (`text/chunk.go`, ~15 LOC)
-- [ ] **Token budget truncation** — cut extracted content to fit model context window before LLM. llm-scraper's `preprocess()` reduces token usage 50-80% (`llm/` or `text/`, ~50 LOC)
-
-**Retry & observability:**
-- [ ] **Retry hooks** — `RetryHookFunc(ctx, attempt, err)` callback injected via context for logging/metrics on each retry. GoClaw's `retryHookFromContext()` pattern (`fetch/`, ~20 LOC)
-- [ ] **Retry with reset** — `retrySend(ctx, name, resetFn, fn)` — reset callback to clean up state before retry attempt. GoClaw's pattern at `internal/cron/retry.go:55` (`fetch/`, ~15 LOC)
-- [ ] **Per-URL retry tracker** — track retry state per URL across calls, avoid retrying permanently broken URLs. Firecrawl's `retryTracker` (`fetch/`, ~50 LOC)
-
-## v1.3.0 — Extraction Quality
+## Next: v1.3.0 — Extraction Quality
 
 *Sources: [Firecrawl](https://github.com/firecrawl/firecrawl), [Crawl4ai](https://github.com/unclecode/crawl4ai), [llm-scraper](https://github.com/mishushakov/llm-scraper)*
 
@@ -116,6 +102,6 @@ Not scheduled. Evaluate after v1.3.0 based on consumer needs.
 | v0.1.1 | Cache |
 | v0.7.0 | All core packages |
 | v1.0.0 | Stable API, sources, strategy interfaces, pipeline orchestrator, 194 tests |
-| **v1.1.0** | **Search quality: unified Result, rate limits, WRR fusion, dedup, categories, markdown — 215 tests** |
-| v1.2.0 | Pipeline robustness (6 items) |
+| v1.1.0 | Search quality: unified Result, rate limits, WRR fusion, dedup, categories, markdown — 215 tests |
+| **v1.2.0** | **Pipeline robustness: fetch+chunk, auto-chunking, token budget, retry hooks/reset/tracker — 264 tests** |
 | v1.3.0 | Extraction quality (7 items) |
