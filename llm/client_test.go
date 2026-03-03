@@ -327,6 +327,75 @@ func TestSummarizeToJSON_ParseFailure(t *testing.T) {
 	}
 }
 
+func TestCompleteMultimodal_Success(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		var body struct {
+			Messages []struct {
+				Content json.RawMessage `json:"content"`
+			} `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		// Multimodal requests have content as array (text + image_url parts).
+		if len(body.Messages) == 0 {
+			http.Error(w, "no messages", http.StatusBadRequest)
+			return
+		}
+		var parts []map[string]any
+		if err := json.Unmarshal(body.Messages[0].Content, &parts); err != nil {
+			t.Errorf("content should be array of parts: %v", err)
+		}
+		if len(parts) != 2 {
+			t.Errorf("expected 2 content parts (text + image_url), got %d", len(parts))
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		resp := mockResponse{
+			Choices: []mockChoice{
+				{Message: mockMessage{Content: "saw the image"}},
+			},
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer srv.Close()
+
+	c := New(WithAPIBase(srv.URL), WithAPIKey("test-key"), WithModel("test"))
+	got, err := c.CompleteMultimodal(context.Background(), "describe this", []ImagePart{
+		{URL: "https://example.com/img.png", MIMEType: "image/png"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "saw the image" {
+		t.Errorf("got %q, want %q", got, "saw the image")
+	}
+}
+
+func TestCompleteMultimodal_StripsFences(t *testing.T) {
+	srv := mockLLMServer(t, "```json\n{\"description\": \"a cat\"}\n```")
+	defer srv.Close()
+
+	c := New(WithAPIBase(srv.URL), WithAPIKey("test-key"), WithModel("test"))
+	got, err := c.CompleteMultimodal(context.Background(), "describe", []ImagePart{
+		{URL: "https://example.com/cat.jpg"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"description": "a cat"}`
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
 func TestExtractJSONAnswer(t *testing.T) {
 	tests := []struct {
 		name string
