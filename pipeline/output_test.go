@@ -1,9 +1,6 @@
 package pipeline
 
 import (
-	"context"
-	"errors"
-	"sync/atomic"
 	"testing"
 
 	"github.com/anatolykoptev/go-engine/llm"
@@ -89,47 +86,6 @@ func TestBuildSearchOutput(t *testing.T) {
 	}
 	if got.Sources[0].Snippet != "c1" {
 		t.Errorf("snippet = %q", got.Sources[0].Snippet)
-	}
-}
-
-func TestParallelFetch(t *testing.T) {
-	var count atomic.Int64
-	urls := []string{"http://a.com", "http://b.com", "http://c.com"}
-	got := ParallelFetch(context.Background(), urls, func(_ context.Context, url string) (string, error) {
-		count.Add(1)
-		return "content-" + url, nil
-	})
-	if len(got) != 3 {
-		t.Errorf("got %d entries, want 3", len(got))
-	}
-	if count.Load() != 3 {
-		t.Errorf("fetch count = %d, want 3", count.Load())
-	}
-	if got["http://a.com"] != "content-http://a.com" {
-		t.Errorf("unexpected content: %q", got["http://a.com"])
-	}
-}
-
-func TestParallelFetch_SkipsErrors(t *testing.T) {
-	urls := []string{"http://a.com", "http://fail.com"}
-	got := ParallelFetch(context.Background(), urls, func(_ context.Context, url string) (string, error) {
-		if url == "http://fail.com" {
-			return "", errors.New("fetch error")
-		}
-		return "ok", nil
-	})
-	if len(got) != 1 {
-		t.Errorf("got %d entries, want 1", len(got))
-	}
-}
-
-func TestParallelFetch_SkipsEmpty(t *testing.T) {
-	urls := []string{"http://a.com"}
-	got := ParallelFetch(context.Background(), urls, func(_ context.Context, _ string) (string, error) {
-		return "", nil
-	})
-	if len(got) != 0 {
-		t.Errorf("got %d entries, want 0 (empty content skipped)", len(got))
 	}
 }
 

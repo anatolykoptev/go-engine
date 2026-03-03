@@ -3,9 +3,6 @@
 package pipeline
 
 import (
-	"context"
-	"sync"
-
 	"github.com/anatolykoptev/go-engine/llm"
 	"github.com/anatolykoptev/go-engine/search"
 )
@@ -72,26 +69,4 @@ func BuildSearchOutput(query string, llmOut *llm.StructuredOutput, results []sea
 		})
 	}
 	return output
-}
-
-// ParallelFetch fetches URL content in parallel, returning url->text map.
-// fetchFn determines how each URL is fetched; errors are silently skipped.
-func ParallelFetch(ctx context.Context, urls []string, fetchFn func(ctx context.Context, url string) (string, error)) map[string]string {
-	contents := make(map[string]string, len(urls))
-	var mu sync.Mutex
-	var wg sync.WaitGroup
-	for _, u := range urls {
-		wg.Add(1)
-		go func(url string) {
-			defer wg.Done()
-			t, err := fetchFn(ctx, url)
-			if err == nil && t != "" {
-				mu.Lock()
-				contents[url] = t
-				mu.Unlock()
-			}
-		}(u)
-	}
-	wg.Wait()
-	return contents
 }
