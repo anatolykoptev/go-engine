@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -397,6 +398,66 @@ func TestCompleteMultimodal_StripsFences(t *testing.T) {
 	want := `{"description": "a cat"}`
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestClient_CompleteWithSystem(t *testing.T) {
+	var capturedSystem string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var req struct {
+			Messages []struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			} `json:"messages"`
+		}
+		if err := json.Unmarshal(body, &req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		for _, m := range req.Messages {
+			if m.Role == "system" {
+				capturedSystem = m.Content
+			}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{
+				{"message": map[string]string{"content": "response"}},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	c := New(WithAPIBase(srv.URL), WithAPIKey("test"))
+	got, err := c.CompleteWithSystem(context.Background(), "You are an extractor.", "Extract this text")
+	if err != nil {
+		t.Fatalf("CompleteWithSystem: %v", err)
+	}
+	if got != "response" {
+		t.Errorf("got %q, want %q", got, "response")
+	}
+	if capturedSystem != "You are an extractor." {
+		t.Errorf("system = %q, want %q", capturedSystem, "You are an extractor.")
+	}
+}
+
+func TestClient_CompleteWithSystem_EmptySystem(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{
+				{"message": map[string]string{"content": "ok"}},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	c := New(WithAPIBase(srv.URL), WithAPIKey("test"))
+	got, err := c.CompleteWithSystem(context.Background(), "", "prompt")
+	if err != nil {
+		t.Fatalf("CompleteWithSystem empty system: %v", err)
+	}
+	if got != "ok" {
+		t.Errorf("got %q, want %q", got, "ok")
 	}
 }
 
