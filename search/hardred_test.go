@@ -424,7 +424,7 @@ func TestHR_SearXNG_SearchQuery_Concurrent(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(searxngResponse{
-			Results: []sources.Result{{Title: "R", URL: "http://r.com"}},
+			Results: []searxngResult{{Title: "R", URL: "http://r.com"}},
 		})
 	}))
 	defer srv.Close()

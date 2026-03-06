@@ -16,9 +16,38 @@ const (
 	languageAll          = "all"
 )
 
+// searxngResult is a raw SearXNG result with flexible Metadata type.
+// SearXNG may return metadata as either a map or an empty string.
+type searxngResult struct {
+	Title    string          `json:"title"`
+	URL      string          `json:"url"`
+	Content  string          `json:"content"`
+	Score    float64         `json:"score"`
+	Engines  []string        `json:"engines"`
+	Metadata json.RawMessage `json:"metadata"`
+}
+
 // searxngResponse is the JSON response from SearXNG API.
 type searxngResponse struct {
-	Results []sources.Result `json:"results"`
+	Results []searxngResult `json:"results"`
+}
+
+// toResults converts raw SearXNG results to sources.Result,
+// gracefully handling metadata that may be a string or map.
+func (r *searxngResponse) toResults() []sources.Result {
+	out := make([]sources.Result, len(r.Results))
+	for i, sr := range r.Results {
+		out[i] = sources.Result{
+			Title:   sr.Title,
+			URL:     sr.URL,
+			Content: sr.Content,
+			Score:   sr.Score,
+		}
+		if len(sr.Metadata) > 0 && sr.Metadata[0] == '{' {
+			_ = json.Unmarshal(sr.Metadata, &out[i].Metadata)
+		}
+	}
+	return out
 }
 
 // SearXNG queries a local SearXNG instance for search results.
@@ -103,7 +132,7 @@ func (s *SearXNG) SearchQuery(ctx context.Context, q sources.Query) ([]sources.R
 	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
 		return nil, err
 	}
-	return data.Results, nil
+	return data.toResults(), nil
 }
 
 // Search queries SearXNG and returns results.
@@ -149,5 +178,5 @@ func (s *SearXNG) Search(ctx context.Context, query, language, timeRange, engine
 	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
 		return nil, err
 	}
-	return data.Results, nil
+	return data.toResults(), nil
 }

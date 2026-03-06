@@ -43,7 +43,7 @@ func TestSearXNG_Search(t *testing.T) {
 		}
 
 		resp := searxngResponse{
-			Results: []sources.Result{
+			Results: []searxngResult{
 				{Title: "Result 1", Content: "Content 1", URL: "https://example.com/1", Score: 0.9},
 				{Title: "Result 2", Content: "Content 2", URL: "https://example.com/2", Score: 0.5},
 			},
