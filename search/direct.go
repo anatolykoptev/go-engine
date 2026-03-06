@@ -24,6 +24,7 @@ type DirectConfig struct {
 	Browser          BrowserDoer
 	DDG              bool
 	Startpage        bool
+	Yandex           YandexConfig
 	Retry            fetch.RetryConfig
 	Metrics          *metrics.Registry
 	DDGLimiter       *rate.Limiter
@@ -95,6 +96,15 @@ func SearchDirect(ctx context.Context, cfg DirectConfig, query, language string)
 			defer wg.Done()
 			results, err := runStartpage(ctx, cfg, query, language)
 			collect(results, err, "startpage")
+		}()
+	}
+
+	if cfg.Yandex.APIKey != "" {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			results, err := SearchYandexAPI(ctx, cfg.Yandex, query, "", cfg.Metrics)
+			collect(results, err, "yandex")
 		}()
 	}
 
