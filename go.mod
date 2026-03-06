@@ -7,7 +7,7 @@ require (
 	github.com/PuerkitoBio/goquery v1.11.0
 	github.com/alicebob/miniredis/v2 v2.37.0
 	github.com/anatolykoptev/go-kit v0.8.0
-	github.com/anatolykoptev/go-stealth v1.4.1-0.20260306072141-3ad1d72f93de
+	github.com/anatolykoptev/go-stealth v1.5.0
 	github.com/markusmobius/go-trafilatura v1.12.2
 	golang.org/x/net v0.51.0
 	golang.org/x/time v0.14.0
