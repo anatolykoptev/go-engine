@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/anatolykoptev/go-engine/metrics"
@@ -27,8 +28,30 @@ const (
 
 // YandexConfig holds Yandex Search API v2 credentials.
 type YandexConfig struct {
-	APIKey   string // Api-Key for Authorization header
-	FolderID string // Yandex Cloud folder ID
+	APIKey       string // Api-Key for Authorization header
+	FolderID     string // Yandex Cloud folder ID
+	MonthlyLimit int    // max requests per calendar month (0 = unlimited)
+}
+
+// yandexMonthlyCounter tracks requests per calendar month.
+var yandexMonthlyCounter struct {
+	count atomic.Int64
+	month atomic.Int32 // current month (1-12)
+}
+
+// yandexCheckLimit returns true if the request is within the monthly limit.
+// Resets counter on month change.
+func yandexCheckLimit(limit int) bool {
+	if limit <= 0 {
+		return true
+	}
+	now := time.Now()
+	currentMonth := int32(now.Month()) //nolint:gosec // Month() returns 1-12, safe for int32
+	if stored := yandexMonthlyCounter.month.Load(); stored != currentMonth {
+		yandexMonthlyCounter.month.CompareAndSwap(stored, currentMonth)
+		yandexMonthlyCounter.count.Store(0)
+	}
+	return yandexMonthlyCounter.count.Add(1) <= int64(limit)
 }
 
 // yandexRequest is the JSON body for searchAsync.
@@ -117,6 +140,11 @@ type yandexXMLPassages struct {
 func SearchYandexAPI(ctx context.Context, cfg YandexConfig, query, region string, m *metrics.Registry) ([]sources.Result, error) {
 	if cfg.APIKey == "" || cfg.FolderID == "" {
 		return nil, errors.New("yandex: api key and folder_id required")
+	}
+
+	if !yandexCheckLimit(cfg.MonthlyLimit) {
+		slog.Warn("yandex: monthly limit reached", slog.Int("limit", cfg.MonthlyLimit))
+		return nil, nil //nolint:nilnil // over budget, skip silently
 	}
 
 	if region == "" {
