@@ -44,10 +44,12 @@ var FetchRetryConfig = RetryConfig{
 
 // Fetcher retrieves HTTP response bodies with optional proxy routing.
 type Fetcher struct {
-	httpClient    *http.Client
-	browserClient *stealth.BrowserClient
-	retryConfig   RetryConfig
-	retryTracker  *stealth.RetryTracker
+	httpClient     *http.Client
+	browserClient  *stealth.BrowserClient
+	retryConfig    RetryConfig
+	retryTracker   *stealth.RetryTracker
+	proxyPool      proxypool.ProxyPool    // deferred: used to build browserClient in New()
+	cookieProvider stealth.CookieProvider // deferred: passed to stealth.NewClient in New()
 }
 
 // Option configures a Fetcher.
@@ -63,21 +65,22 @@ func WithRetryConfig(rc RetryConfig) Option {
 	return func(f *Fetcher) { f.retryConfig = rc }
 }
 
-// WithProxyPool initializes a BrowserClient with Chrome TLS fingerprint and proxy rotation.
+// WithProxyPool enables proxy rotation via a ProxyPool.
+// The BrowserClient is created in New() after all options are applied,
+// so WithCookieSolver can be combined regardless of option order.
 func WithProxyPool(pool proxypool.ProxyPool) Option {
 	return func(f *Fetcher) {
-		if pool == nil {
-			return
+		if pool != nil {
+			f.proxyPool = pool
 		}
-		bc, err := stealth.NewClient(
-			stealth.WithTimeout(browserClientTimeoutSec),
-			stealth.WithProxyPool(pool),
-			stealth.WithFollowRedirects(),
-		)
-		if err != nil {
-			return
-		}
-		f.browserClient = bc
+	}
+}
+
+// WithCookieSolver enables Cloudflare challenge solving via go-stealth's CookieProvider.
+// Requires WithProxyPool (no effect without a BrowserClient).
+func WithCookieSolver(provider stealth.CookieProvider) Option {
+	return func(f *Fetcher) {
+		f.cookieProvider = provider
 	}
 }
 
@@ -105,6 +108,22 @@ func New(opts ...Option) *Fetcher {
 	for _, o := range opts {
 		o(f)
 	}
+
+	// Build BrowserClient after all options are applied (order-independent).
+	if f.proxyPool != nil {
+		stealthOpts := []stealth.ClientOption{
+			stealth.WithTimeout(browserClientTimeoutSec),
+			stealth.WithProxyPool(f.proxyPool),
+			stealth.WithFollowRedirects(),
+		}
+		if f.cookieProvider != nil {
+			stealthOpts = append(stealthOpts, stealth.WithCookieSolver(f.cookieProvider))
+		}
+		if bc, err := stealth.NewClient(stealthOpts...); err == nil {
+			f.browserClient = bc
+		}
+	}
+
 	return f
 }
 
