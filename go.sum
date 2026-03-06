@@ -12,6 +12,8 @@ github.com/anatolykoptev/go-kit v0.8.0 h1:HpeMgdO/TEhBE659r4fbGaAZt3qCCt1Q8qYxd7
 github.com/anatolykoptev/go-kit v0.8.0/go.mod h1:sxZXhRKXffOpIH5oSOCcnRZjiQT0s6te4os6eMUMwqg=
 github.com/anatolykoptev/go-stealth v1.5.0 h1:mAJYhb1Y82qXjcQPwdvfbAF2BZyisLpCBQCjKCR1Bvo=
 github.com/anatolykoptev/go-stealth v1.5.0/go.mod h1:HbjBbeEjCOBNljrKssELoCvah56DiIwVzrwNSyuAsfU=
+github.com/anatolykoptev/go-stealth v1.5.1-0.20260306090743-4a2f5cd2331d h1:aAyeD4iwUEzfcEl7UA9Urlp0S/w5Hj9kbXO27MaQc58=
+github.com/anatolykoptev/go-stealth v1.5.1-0.20260306090743-4a2f5cd2331d/go.mod h1:HbjBbeEjCOBNljrKssELoCvah56DiIwVzrwNSyuAsfU=
 github.com/andybalholm/brotli v1.2.0 h1:ukwgCxwYrmACq68yiUqwIWnGY0cTPox/M94sVwToPjQ=
 github.com/andybalholm/brotli v1.2.0/go.mod h1:rzTDkvFWvIrjDXZHkuS16NPggd91W3kUSvPlQ1pLaKY=
 github.com/andybalholm/cascadia v1.3.3 h1:AG2YHrzJIm4BZ19iwJ/DAua6Btl3IwJX+VI4kktS1LM=

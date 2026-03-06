@@ -24,11 +24,15 @@ type DirectConfig struct {
 	Browser          BrowserDoer
 	DDG              bool
 	Startpage        bool
+	Brave            bool
+	Reddit           bool
 	Yandex           YandexConfig
 	Retry            fetch.RetryConfig
 	Metrics          *metrics.Registry
 	DDGLimiter       *rate.Limiter
 	StartpageLimiter *rate.Limiter
+	BraveLimiter     *rate.Limiter
+	RedditLimiter    *rate.Limiter
 }
 
 // runDDG waits on the optional rate limiter then fetches DDG results.
@@ -56,6 +60,34 @@ func runStartpage(ctx context.Context, cfg DirectConfig, query, language string)
 	}
 	return fetch.RetryDo(ctx, cfg.Retry, func() ([]sources.Result, error) {
 		return SearchStartpageDirect(ctx, cfg.Browser, query, language, cfg.Metrics)
+	})
+}
+
+// runBrave waits on the optional rate limiter then fetches Brave results.
+// Returns nil on limiter cancellation.
+func runBrave(ctx context.Context, cfg DirectConfig, query string) ([]sources.Result, error) {
+	if cfg.BraveLimiter != nil {
+		if err := cfg.BraveLimiter.Wait(ctx); err != nil {
+			slog.Debug("brave rate limit wait", slog.Any("error", err))
+			return nil, nil //nolint:nilerr // limiter cancelled: skip engine
+		}
+	}
+	return fetch.RetryDo(ctx, cfg.Retry, func() ([]sources.Result, error) {
+		return SearchBraveDirect(ctx, cfg.Browser, query, cfg.Metrics)
+	})
+}
+
+// runReddit waits on the optional rate limiter then fetches Reddit results.
+// Returns nil on limiter cancellation.
+func runReddit(ctx context.Context, cfg DirectConfig, query string) ([]sources.Result, error) {
+	if cfg.RedditLimiter != nil {
+		if err := cfg.RedditLimiter.Wait(ctx); err != nil {
+			slog.Debug("reddit rate limit wait", slog.Any("error", err))
+			return nil, nil //nolint:nilerr // limiter cancelled: skip engine
+		}
+	}
+	return fetch.RetryDo(ctx, cfg.Retry, func() ([]sources.Result, error) {
+		return SearchRedditDirect(ctx, cfg.Browser, query, cfg.Metrics)
 	})
 }
 
@@ -96,6 +128,24 @@ func SearchDirect(ctx context.Context, cfg DirectConfig, query, language string)
 			defer wg.Done()
 			results, err := runStartpage(ctx, cfg, query, language)
 			collect(results, err, "startpage")
+		}()
+	}
+
+	if cfg.Brave {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			results, err := runBrave(ctx, cfg, query)
+			collect(results, err, "brave")
+		}()
+	}
+
+	if cfg.Reddit {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			results, err := runReddit(ctx, cfg, query)
+			collect(results, err, "reddit")
 		}()
 	}
 

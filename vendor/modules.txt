@@ -33,7 +33,7 @@ github.com/alicebob/miniredis/v2/size
 ## explicit; go 1.26
 github.com/anatolykoptev/go-kit/llm
 github.com/anatolykoptev/go-kit/metrics
-# github.com/anatolykoptev/go-stealth v1.5.0
+# github.com/anatolykoptev/go-stealth v1.5.1-0.20260306090743-4a2f5cd2331d
 ## explicit; go 1.26
 github.com/anatolykoptev/go-stealth
 github.com/anatolykoptev/go-stealth/proxypool
