@@ -170,9 +170,9 @@ func TestIsStartpageRateLimited(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := isStartpageRateLimited(tt.body)
+			got := startpageCheckRateLimit(tt.body)
 			if got != tt.want {
-				t.Errorf("isStartpageRateLimited() = %v, want %v (body: %s)", got, tt.want, tt.body)
+				t.Errorf("startpageCheckRateLimit() = %v, want %v (body: %s)", got, tt.want, tt.body)
 			}
 		})
 	}

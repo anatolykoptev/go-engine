@@ -1,42 +1,22 @@
 package search
 
 import (
-	"net/url"
-
 	"github.com/anatolykoptev/go-engine/sources"
+	"github.com/anatolykoptev/go-stealth/websearch"
 )
 
 // FilterByScore removes results below minScore, keeping at least minKeep.
+// Delegates to websearch.FilterByScore.
 func FilterByScore(results []sources.Result, minScore float64, minKeep int) []sources.Result {
-	var out []sources.Result
-	for _, r := range results {
-		if r.Score >= minScore {
-			out = append(out, r)
-		}
-	}
-	if len(out) < minKeep && len(results) >= minKeep {
-		return results[:minKeep]
-	}
-	if len(out) < minKeep {
-		return results
-	}
-	return out
+	ws := sourceToWSResults(results)
+	filtered := websearch.FilterByScore(ws, minScore, minKeep)
+	return wsToSourceResults(filtered)
 }
 
 // DedupByDomain limits results to maxPerDomain per domain.
+// Delegates to websearch.DedupByDomain.
 func DedupByDomain(results []sources.Result, maxPerDomain int) []sources.Result {
-	counts := make(map[string]int)
-	var out []sources.Result
-	for _, r := range results {
-		u, err := url.Parse(r.URL)
-		if err != nil {
-			continue
-		}
-		domain := u.Hostname()
-		if counts[domain] < maxPerDomain {
-			out = append(out, r)
-			counts[domain]++
-		}
-	}
-	return out
+	ws := sourceToWSResults(results)
+	deduped := websearch.DedupByDomain(ws, maxPerDomain)
+	return wsToSourceResults(deduped)
 }

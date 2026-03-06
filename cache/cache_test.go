@@ -91,12 +91,14 @@ func TestMemory_Eviction(t *testing.T) {
 		}
 	}
 
-	// Should have at most maxEntries.
+	// Should have at most maxEntries. Verify by counting Get hits for all keys.
 	count := 0
-	m.store.Range(func(_, _ any) bool {
-		count++
-		return true
-	})
+	for i := range 5 {
+		key := string(rune('a' + i))
+		if _, ok := m.Get(ctx, key); ok {
+			count++
+		}
+	}
 	if count > 3 {
 		t.Errorf("after eviction, count = %d, want <= 3", count)
 	}

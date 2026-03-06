@@ -2,7 +2,6 @@ package search
 
 import (
 	"context"
-	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -42,14 +41,11 @@ func TestSearXNG_Search(t *testing.T) {
 			t.Errorf("X-Forwarded-For = %q, want 127.0.0.1", r.Header.Get("X-Forwarded-For"))
 		}
 
-		resp := searxngResponse{
-			Results: []searxngResult{
-				{Title: "Result 1", Content: "Content 1", URL: "https://example.com/1", Score: 0.9},
-				{Title: "Result 2", Content: "Content 2", URL: "https://example.com/2", Score: 0.5},
-			},
-		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(resp)
+		_, _ = w.Write([]byte(`{"results":[
+			{"title":"Result 1","content":"Content 1","url":"https://example.com/1","score":0.9},
+			{"title":"Result 2","content":"Content 2","url":"https://example.com/2","score":0.5}
+		]}`))
 	}))
 	defer srv.Close()
 

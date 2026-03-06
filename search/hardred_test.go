@@ -2,7 +2,6 @@ package search
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -423,9 +422,7 @@ func TestHR_SearXNG_SearchQuery_AllParams(t *testing.T) {
 func TestHR_SearXNG_SearchQuery_Concurrent(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(searxngResponse{
-			Results: []searxngResult{{Title: "R", URL: "http://r.com"}},
-		})
+		_, _ = w.Write([]byte(`{"results":[{"title":"R","url":"http://r.com"}]}`))
 	}))
 	defer srv.Close()
 
@@ -486,7 +483,7 @@ func TestHR_IsDDGRateLimited_MarkerInAttribute(t *testing.T) {
 }
 
 func TestHR_IsStartpageRateLimited_NilBody(t *testing.T) {
-	if isStartpageRateLimited(nil) {
+	if startpageCheckRateLimit(nil) {
 		t.Error("nil body should not be rate limited")
 	}
 }
