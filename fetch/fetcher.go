@@ -51,6 +51,7 @@ type Fetcher struct {
 	proxyPool      proxypool.ProxyPool    // deferred: used to build browserClient in New()
 	cookieProvider stealth.CookieProvider // deferred: passed to stealth.NewClient in New()
 	byparrURL      string                 // Byparr fallback URL (empty = disabled)
+	oxBrowserURL   string                 // ox-browser /fetch-smart fallback (empty = disabled)
 }
 
 // Option configures a Fetcher.
@@ -135,7 +136,7 @@ func New(opts ...Option) *Fetcher {
 // and records the outcome (attempt or success) after.
 func (f *Fetcher) FetchBody(ctx context.Context, url string) ([]byte, error) {
 	permanent := f.retryTracker != nil && !f.retryTracker.ShouldRetry(url)
-	if permanent && f.byparrURL == "" {
+	if permanent && f.oxBrowserURL == "" && f.byparrURL == "" {
 		return nil, ErrPermanentlyFailed
 	}
 
@@ -152,7 +153,17 @@ func (f *Fetcher) FetchBody(ctx context.Context, url string) ([]byte, error) {
 		body, err = f.fetchViaHTTP(ctx, url)
 	}
 
-	// Fallback to Byparr when proxy fails (blocked domain, CF challenge, etc.).
+	// Fallback to ox-browser when proxy fails (wreq+BoringSSL + headless solve).
+	// Use a fresh context — the original may be expired after proxy retries.
+	if err != nil && f.oxBrowserURL != "" {
+		obCtx, obCancel := context.WithTimeout(context.Background(), oxBrowserTimeout+5*time.Second)
+		defer obCancel()
+		if fallback, obErr := f.fetchViaOxBrowser(obCtx, url); obErr == nil {
+			body, err = fallback, nil
+		}
+	}
+
+	// Fallback to Byparr when ox-browser also fails (or not configured).
 	// Use a fresh context — the original may be expired after proxy retries.
 	if err != nil && f.byparrURL != "" {
 		fbCtx, fbCancel := context.WithTimeout(context.Background(), byparrTimeout)
