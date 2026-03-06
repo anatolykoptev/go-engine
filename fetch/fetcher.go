@@ -50,6 +50,7 @@ type Fetcher struct {
 	retryTracker   *stealth.RetryTracker
 	proxyPool      proxypool.ProxyPool    // deferred: used to build browserClient in New()
 	cookieProvider stealth.CookieProvider // deferred: passed to stealth.NewClient in New()
+	byparrURL      string                 // Byparr fallback URL (empty = disabled)
 }
 
 // Option configures a Fetcher.
@@ -143,6 +144,13 @@ func (f *Fetcher) FetchBody(ctx context.Context, url string) ([]byte, error) {
 		body, err = f.fetchViaProxy(ctx, url)
 	} else {
 		body, err = f.fetchViaHTTP(ctx, url)
+	}
+
+	// Fallback to Byparr when proxy fails (blocked domain, CF challenge, etc.).
+	if err != nil && f.byparrURL != "" {
+		if fallback, fbErr := f.fetchViaByparr(ctx, url); fbErr == nil {
+			body, err = fallback, nil
+		}
 	}
 
 	if f.retryTracker != nil {
