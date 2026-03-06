@@ -134,21 +134,30 @@ func New(opts ...Option) *Fetcher {
 // When a RetryTracker is configured, it checks ShouldRetry before each request
 // and records the outcome (attempt or success) after.
 func (f *Fetcher) FetchBody(ctx context.Context, url string) ([]byte, error) {
-	if f.retryTracker != nil && !f.retryTracker.ShouldRetry(url) {
+	permanent := f.retryTracker != nil && !f.retryTracker.ShouldRetry(url)
+	if permanent && f.byparrURL == "" {
 		return nil, ErrPermanentlyFailed
 	}
 
 	var body []byte
 	var err error
-	if f.browserClient != nil {
+
+	switch {
+	case permanent:
+		// Skip proxy (known to fail), go straight to Byparr.
+		err = ErrPermanentlyFailed
+	case f.browserClient != nil:
 		body, err = f.fetchViaProxy(ctx, url)
-	} else {
+	default:
 		body, err = f.fetchViaHTTP(ctx, url)
 	}
 
 	// Fallback to Byparr when proxy fails (blocked domain, CF challenge, etc.).
+	// Use a fresh context — the original may be expired after proxy retries.
 	if err != nil && f.byparrURL != "" {
-		if fallback, fbErr := f.fetchViaByparr(ctx, url); fbErr == nil {
+		fbCtx, fbCancel := context.WithTimeout(context.Background(), byparrTimeout)
+		defer fbCancel()
+		if fallback, fbErr := f.fetchViaByparr(fbCtx, url); fbErr == nil {
 			body, err = fallback, nil
 		}
 	}
