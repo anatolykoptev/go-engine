@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/anatolykoptev/go-engine/sources"
@@ -40,20 +41,28 @@ Include commands, code, or URLs where available in sources.`,
 Be practical — if the question implies a choice, give a recommendation.`,
 }
 
-// BuildSourcesText formats search results and their fetched content for LLM context.
-// Each source's content is truncated to fit within maxTokens using charsPerToken estimation.
-func BuildSourcesText(results []sources.Result, contents map[string]string, maxTokens int, charsPerToken float64) string {
+// rankedWeights defines the percentage of total budget each source gets by rank.
+// Sources beyond this list get snippet-only treatment (no fetched content).
+var rankedWeights = []float64{0.30, 0.25, 0.20, 0.15, 0.10}
+
+// BuildSourcesText formats search results with ranked token allocation.
+// totalBudget is the TOTAL token budget across all sources (not per-source).
+// Higher-ranked sources get proportionally more content; low-ranked ones get snippets only.
+func BuildSourcesText(results []sources.Result, contents map[string]string, totalBudget int, charsPerToken float64) string {
 	var sb strings.Builder
 	for i, r := range results {
 		fmt.Fprintf(&sb, "\n[%d] %s\nURL: %s\n", i+1, r.Title, r.URL)
-		if c, ok := contents[r.URL]; ok && c != "" {
-			c = text.TruncateToTokenBudget(c, maxTokens, charsPerToken)
+
+		c, hasContent := contents[r.URL]
+		if hasContent && c != "" && i < len(rankedWeights) {
+			tokens := int(math.Ceil(float64(totalBudget) * rankedWeights[i]))
+			c = text.TruncateToTokenBudget(c, tokens, charsPerToken)
 			fmt.Fprintf(&sb, "Content: %s\n", c)
+			continue
 		}
+
 		if r.Content != "" {
-			if _, ok := contents[r.URL]; !ok {
-				fmt.Fprintf(&sb, "Snippet: %s\n", r.Content)
-			}
+			fmt.Fprintf(&sb, "Snippet: %s\n", r.Content)
 		}
 	}
 	return sb.String()
