@@ -119,6 +119,77 @@ func (c *Client) SummarizeDeep(ctx context.Context, query, instruction string, m
 	return &out, nil
 }
 
+// SummarizeOpts configures a summarization call.
+type SummarizeOpts struct {
+	Query           string
+	Instruction     string
+	TotalBudget     int // total token budget for source context
+	CharsPerToken   float64
+	MaxOutputTokens int // 0 = use client default
+}
+
+// SummarizeWithOpts summarizes search results with full control over budget.
+func (c *Client) SummarizeWithOpts(ctx context.Context, opts SummarizeOpts, results []sources.Result, contents map[string]string) (*StructuredOutput, error) {
+	srcs := BuildSourcesText(results, contents, opts.TotalBudget, opts.CharsPerToken)
+
+	var prompt string
+	if opts.Instruction != "" {
+		prompt = fmt.Sprintf(PromptBase, currentDate(), opts.Instruction, opts.Query, srcs)
+	} else {
+		qt := text.DetectQueryType(opts.Query)
+		instruction := TypeInstructions[qt]
+		prompt = fmt.Sprintf(PromptBase, currentDate(), instruction, opts.Query, srcs)
+	}
+
+	maxOut := opts.MaxOutputTokens
+	if maxOut == 0 {
+		maxOut = c.maxTokens
+	}
+
+	raw, err := c.CompleteParams(ctx, prompt, c.temperature, maxOut)
+	if err != nil {
+		return nil, err
+	}
+
+	var out StructuredOutput
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		if answer := ExtractJSONAnswer(raw); answer != "" {
+			return &StructuredOutput{Answer: answer}, nil
+		}
+		return &StructuredOutput{Answer: raw}, nil
+	}
+	return &out, nil
+}
+
+// SummarizeDeepWithOpts summarizes with exhaustive fact extraction and output cap.
+func (c *Client) SummarizeDeepWithOpts(ctx context.Context, opts SummarizeOpts, results []sources.Result, contents map[string]string) (*StructuredOutput, error) {
+	srcs := BuildSourcesText(results, contents, opts.TotalBudget, opts.CharsPerToken)
+	instructionSection := ""
+	if opts.Instruction != "" {
+		instructionSection = opts.Instruction + "\n\n"
+	}
+	prompt := fmt.Sprintf(PromptDeep, currentDate(), instructionSection, opts.Query, srcs)
+
+	maxOut := opts.MaxOutputTokens
+	if maxOut == 0 {
+		maxOut = c.maxTokens
+	}
+
+	raw, err := c.CompleteParams(ctx, prompt, c.temperature, maxOut)
+	if err != nil {
+		return nil, err
+	}
+
+	var out StructuredOutput
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		if answer := ExtractJSONAnswer(raw); answer != "" {
+			return &StructuredOutput{Answer: answer}, nil
+		}
+		return &StructuredOutput{Answer: raw}, nil
+	}
+	return &out, nil
+}
+
 // SummarizeToJSON builds an LLM prompt from search results and parses the response as JSON into T.
 // Returns (parsed, "", nil) on success, (nil, raw, nil) on parse failure (caller handles fallback),
 // or (nil, "", err) on LLM error.
