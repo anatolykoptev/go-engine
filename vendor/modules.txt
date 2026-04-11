@@ -33,7 +33,7 @@ github.com/alicebob/miniredis/v2/size
 ## explicit; go 1.26
 github.com/anatolykoptev/go-kit/llm
 github.com/anatolykoptev/go-kit/metrics
-# github.com/anatolykoptev/go-stealth v1.5.1-0.20260306195200-b28d67aab251
+# github.com/anatolykoptev/go-stealth v1.12.0
 ## explicit; go 1.26
 github.com/anatolykoptev/go-stealth
 github.com/anatolykoptev/go-stealth/proxypool
@@ -115,9 +115,6 @@ github.com/cespare/xxhash/v2
 # github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f
 ## explicit
 github.com/dgryski/go-rendezvous
-# github.com/elliotchance/pie/v2 v2.9.0
-## explicit; go 1.18
-github.com/elliotchance/pie/v2
 # github.com/forPelevin/gomoji v1.2.0
 ## explicit; go 1.19
 github.com/forPelevin/gomoji
@@ -140,7 +137,7 @@ github.com/hablullah/go-juliandays
 # github.com/jalaali/go-jalaali v0.0.0-20210801064154-80525e88d958
 ## explicit; go 1.13
 github.com/jalaali/go-jalaali
-# github.com/klauspost/compress v1.18.2
+# github.com/klauspost/compress v1.18.4
 ## explicit; go 1.23
 github.com/klauspost/compress
 github.com/klauspost/compress/fse
@@ -150,8 +147,8 @@ github.com/klauspost/compress/internal/le
 github.com/klauspost/compress/internal/snapref
 github.com/klauspost/compress/zstd
 github.com/klauspost/compress/zstd/internal/xxhash
-# github.com/markusmobius/go-dateparser v1.2.3
-## explicit; go 1.20
+# github.com/markusmobius/go-dateparser v1.2.4
+## explicit; go 1.24.1
 github.com/markusmobius/go-dateparser
 github.com/markusmobius/go-dateparser/date
 github.com/markusmobius/go-dateparser/internal/data
@@ -198,8 +195,8 @@ github.com/markusmobius/go-domdistiller/internal/re2go
 github.com/markusmobius/go-domdistiller/internal/stringutil
 github.com/markusmobius/go-domdistiller/internal/tableclass
 github.com/markusmobius/go-domdistiller/internal/webdoc
-# github.com/markusmobius/go-htmldate v1.9.1
-## explicit; go 1.22.0
+# github.com/markusmobius/go-htmldate v1.9.3
+## explicit; go 1.24.1
 github.com/markusmobius/go-htmldate
 github.com/markusmobius/go-htmldate/internal/re2go
 github.com/markusmobius/go-htmldate/internal/selector
@@ -210,8 +207,8 @@ github.com/markusmobius/go-trafilatura/internal/etree
 github.com/markusmobius/go-trafilatura/internal/lru
 github.com/markusmobius/go-trafilatura/internal/re2go
 github.com/markusmobius/go-trafilatura/internal/selector
-# github.com/mattn/go-colorable v0.1.13
-## explicit; go 1.15
+# github.com/mattn/go-colorable v0.1.14
+## explicit; go 1.18
 github.com/mattn/go-colorable
 # github.com/mattn/go-isatty v0.0.20
 ## explicit; go 1.15
@@ -240,7 +237,7 @@ github.com/redis/go-redis/v9/push
 # github.com/rivo/uniseg v0.4.7
 ## explicit; go 1.18
 github.com/rivo/uniseg
-# github.com/rs/zerolog v1.33.0
+# github.com/rs/zerolog v1.34.0
 ## explicit; go 1.15
 github.com/rs/zerolog
 github.com/rs/zerolog/internal/cbor
@@ -248,8 +245,8 @@ github.com/rs/zerolog/internal/json
 # github.com/tam7t/hpkp v0.0.0-20160821193359-2b70b4024ed5
 ## explicit
 github.com/tam7t/hpkp
-# github.com/tetratelabs/wazero v1.8.1
-## explicit; go 1.21
+# github.com/tetratelabs/wazero v1.11.0
+## explicit; go 1.24.0
 github.com/tetratelabs/wazero
 github.com/tetratelabs/wazero/api
 github.com/tetratelabs/wazero/experimental
@@ -285,12 +282,12 @@ github.com/tetratelabs/wazero/internal/wasm/binary
 github.com/tetratelabs/wazero/internal/wasmdebug
 github.com/tetratelabs/wazero/internal/wasmruntime
 github.com/tetratelabs/wazero/sys
-# github.com/wasilibs/go-re2 v1.7.0
-## explicit; go 1.21
+# github.com/wasilibs/go-re2 v1.10.0
+## explicit; go 1.22.0
 github.com/wasilibs/go-re2
 github.com/wasilibs/go-re2/internal
 github.com/wasilibs/go-re2/internal/cre2
-# github.com/wasilibs/wazero-helpers v0.0.0-20240620070341-3dff1577cd52
+# github.com/wasilibs/wazero-helpers v0.0.0-20250123031827-cd30c44769bb
 ## explicit; go 1.20
 github.com/wasilibs/wazero-helpers/allocator
 # github.com/yosssi/gohtml v0.0.0-20201013000340-ee4748c638f4
@@ -315,9 +312,6 @@ golang.org/x/crypto/hkdf
 golang.org/x/crypto/internal/alias
 golang.org/x/crypto/internal/poly1305
 golang.org/x/crypto/sha3
-# golang.org/x/exp v0.0.0-20241009180824-f66d83c29e7c
-## explicit; go 1.22.0
-golang.org/x/exp/constraints
 # golang.org/x/net v0.51.0
 ## explicit; go 1.25.0
 golang.org/x/net/bpf
@@ -334,11 +328,11 @@ golang.org/x/net/internal/socks
 golang.org/x/net/ipv4
 golang.org/x/net/ipv6
 golang.org/x/net/proxy
-# golang.org/x/sync v0.19.0
-## explicit; go 1.24.0
+# golang.org/x/sync v0.20.0
+## explicit; go 1.25.0
 golang.org/x/sync/singleflight
-# golang.org/x/sys v0.41.0
-## explicit; go 1.24.0
+# golang.org/x/sys v0.42.0
+## explicit; go 1.25.0
 golang.org/x/sys/cpu
 golang.org/x/sys/unix
 golang.org/x/sys/windows
@@ -367,6 +361,6 @@ golang.org/x/text/transform
 golang.org/x/text/unicode/bidi
 golang.org/x/text/unicode/norm
 golang.org/x/text/unicode/rangetable
-# golang.org/x/time v0.14.0
-## explicit; go 1.24.0
+# golang.org/x/time v0.15.0
+## explicit; go 1.25.0
 golang.org/x/time/rate
