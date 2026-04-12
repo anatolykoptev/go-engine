@@ -41,6 +41,25 @@ Include commands, code, or URLs where available in sources.`,
 Be practical — if the question implies a choice, give a recommendation.`,
 }
 
+// BuildSourcesTextWeighted formats search results with custom weight allocation.
+func BuildSourcesTextWeighted(results []sources.Result, contents map[string]string, totalBudget int, charsPerToken float64, weights []float64) string {
+	var sb strings.Builder
+	for i, r := range results {
+		fmt.Fprintf(&sb, "\n[%d] %s\nURL: %s\n", i+1, r.Title, r.URL)
+		c, hasContent := contents[r.URL]
+		if hasContent && c != "" && i < len(weights) {
+			tokens := int(math.Ceil(float64(totalBudget) * weights[i]))
+			c = text.TruncateToTokenBudget(c, tokens, charsPerToken)
+			fmt.Fprintf(&sb, "Content: %s\n", c)
+			continue
+		}
+		if r.Content != "" {
+			fmt.Fprintf(&sb, "Snippet: %s\n", r.Content)
+		}
+	}
+	return sb.String()
+}
+
 // rankedWeights defines the percentage of total budget each source gets by rank.
 // Sources beyond this list get snippet-only treatment (no fetched content).
 var rankedWeights = []float64{0.30, 0.25, 0.20, 0.15, 0.10}
@@ -207,6 +226,42 @@ func SummarizeToJSON[T any](ctx context.Context, c *Client, query, instruction s
 		return nil, raw, nil //nolint:nilerr // by design: parse failure returns raw for caller handling
 	}
 	return &out, "", nil
+}
+
+// SummarizeWithTier summarizes with tier-specific weights and prompt selection.
+func (c *Client) SummarizeWithTier(ctx context.Context, opts SummarizeOpts, results []sources.Result, contents map[string]string, weights []float64, useDeepPrompt bool) (*StructuredOutput, error) {
+	srcs := BuildSourcesTextWeighted(results, contents, opts.TotalBudget, opts.CharsPerToken, weights)
+	var prompt string
+	if useDeepPrompt {
+		instructionSection := ""
+		if opts.Instruction != "" {
+			instructionSection = opts.Instruction + "\n\n"
+		}
+		prompt = fmt.Sprintf(PromptDeep, currentDate(), instructionSection, opts.Query, srcs)
+	} else {
+		instruction := opts.Instruction
+		if instruction == "" {
+			qt := text.DetectQueryType(opts.Query)
+			instruction = TypeInstructions[qt]
+		}
+		prompt = fmt.Sprintf(PromptBase, currentDate(), instruction, opts.Query, srcs)
+	}
+	maxOut := opts.MaxOutputTokens
+	if maxOut == 0 {
+		maxOut = c.maxTokens
+	}
+	raw, err := c.CompleteParams(ctx, prompt, c.temperature, maxOut)
+	if err != nil {
+		return nil, err
+	}
+	var out StructuredOutput
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		if answer := ExtractJSONAnswer(raw); answer != "" {
+			return &StructuredOutput{Answer: answer}, nil
+		}
+		return &StructuredOutput{Answer: raw}, nil
+	}
+	return &out, nil
 }
 
 // ExtractJSONAnswer extracts the "answer" field from malformed JSON
