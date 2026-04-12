@@ -104,10 +104,10 @@ func SearchDirect(ctx context.Context, cfg DirectConfig, query, language string)
 
 	collect := func(results []sources.Result, err error, label string) {
 		if err != nil {
-			slog.Debug(label+" direct failed", slog.Any("error", err))
+			slog.Warn("search source failed", slog.String("source", label), slog.Any("error", err))
 			return
 		}
-		slog.Debug(label+" direct results", slog.Int("count", len(results)))
+		slog.Info("search source results", slog.String("source", label), slog.Int("count", len(results)))
 		mu.Lock()
 		all = append(all, results...)
 		mu.Unlock()
