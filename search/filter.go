@@ -2,7 +2,7 @@ package search
 
 import (
 	"github.com/anatolykoptev/go-engine/sources"
-	"github.com/anatolykoptev/go-stealth/websearch"
+	"github.com/anatolykoptev/go-engine/websearch"
 )
 
 // FilterByScore removes results below minScore, keeping at least minKeep.

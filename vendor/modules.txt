@@ -33,13 +33,12 @@ github.com/alicebob/miniredis/v2/size
 ## explicit; go 1.26
 github.com/anatolykoptev/go-kit/llm
 github.com/anatolykoptev/go-kit/metrics
-# github.com/anatolykoptev/go-stealth v1.12.4
+# github.com/anatolykoptev/go-stealth v1.13.0
 ## explicit; go 1.26
 github.com/anatolykoptev/go-stealth
 github.com/anatolykoptev/go-stealth/proxypool
 github.com/anatolykoptev/go-stealth/ratelimit
 github.com/anatolykoptev/go-stealth/webcache
-github.com/anatolykoptev/go-stealth/websearch
 github.com/anatolykoptev/go-stealth/webtext
 # github.com/andybalholm/brotli v1.2.0
 ## explicit; go 1.22

@@ -6,7 +6,7 @@ import (
 	"unicode"
 
 	"github.com/anatolykoptev/go-engine/sources"
-	"github.com/anatolykoptev/go-stealth/websearch"
+	"github.com/anatolykoptev/go-engine/websearch"
 )
 
 // DedupSnippets removes near-duplicate results based on BoW cosine similarity
