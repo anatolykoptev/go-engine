@@ -118,6 +118,7 @@ func New(opts ...Option) *Fetcher {
 			stealth.WithTimeout(browserClientTimeoutSec),
 			stealth.WithProxyPool(f.proxyPool),
 			stealth.WithFollowRedirects(),
+			stealth.WithRetryOnBlock(2),
 		}
 		if f.cookieProvider != nil {
 			stealthOpts = append(stealthOpts, stealth.WithCookieSolver(f.cookieProvider))
