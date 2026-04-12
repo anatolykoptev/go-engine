@@ -4,7 +4,6 @@ import (
 	"context"
 	"io"
 	"log/slog"
-	"net/http"
 	"sync"
 
 	"golang.org/x/time/rate"
@@ -30,7 +29,6 @@ type DirectConfig struct {
 	Reddit           bool
 	Bing             bool
 	Yep              bool
-	YepClient        *http.Client // plain HTTP for Yep JSON API
 	Yandex           YandexConfig
 	Retry            fetch.RetryConfig
 	Metrics          *metrics.Registry
@@ -86,7 +84,7 @@ func SearchDirect(ctx context.Context, cfg DirectConfig, query, language string)
 		{cfg.Reddit, "reddit", func() ([]sources.Result, error) { return runReddit(ctx, cfg, query) }},
 		{cfg.Bing, "bing", func() ([]sources.Result, error) { return runBing(ctx, cfg, query) }},
 		{cfg.Yep, "yep", func() ([]sources.Result, error) {
-			y := websearch.NewYep(websearch.WithYepHTTPClient(cfg.YepClient))
+			y := websearch.NewYep(websearch.WithYepBrowser(cfg.Browser))
 			return y.Search(ctx, query, websearch.SearchOpts{})
 		}},
 		{cfg.Yandex.APIKey != "", "yandex", func() ([]sources.Result, error) {

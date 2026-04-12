@@ -3,7 +3,6 @@ package websearch
 import (
 	"context"
 	"log/slog"
-	"net/http"
 	"sync"
 
 	"golang.org/x/time/rate"
@@ -18,7 +17,6 @@ type DirectConfig struct {
 	Reddit           bool
 	Bing             bool
 	Yep              bool
-	YepClient        *http.Client // plain HTTP for Yep JSON API
 	Yandex           YandexConfig
 	DDGLimiter       *rate.Limiter
 	StartpageLimiter *rate.Limiter
@@ -98,7 +96,7 @@ func SearchDirect(ctx context.Context, cfg DirectConfig, query, language string)
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			y := NewYep(WithYepHTTPClient(cfg.YepClient))
+			y := NewYep(WithYepBrowser(cfg.Browser))
 			results, err := y.Search(ctx, query, SearchOpts{})
 			collect(results, err, "yep")
 		}()

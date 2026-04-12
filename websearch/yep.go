@@ -3,8 +3,8 @@ package websearch
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -14,21 +14,22 @@ const yepEndpoint = "https://api.yep.com/fs/2/search"
 
 // Yep searches Yep.com (Ahrefs) via its public JSON API.
 // No API key required. Own independent index.
+// Uses BrowserDoer (TLS fingerprint) to bypass Cloudflare protection.
 type Yep struct {
-	httpClient *http.Client
+	browser BrowserDoer
 }
 
 // YepOption configures Yep.
 type YepOption func(*Yep)
 
-// WithYepHTTPClient sets the HTTP client (for proxy support).
-func WithYepHTTPClient(c *http.Client) YepOption {
-	return func(y *Yep) { y.httpClient = c }
+// WithYepBrowser sets the BrowserDoer for HTTP requests.
+func WithYepBrowser(bc BrowserDoer) YepOption {
+	return func(y *Yep) { y.browser = bc }
 }
 
 // NewYep creates a Yep search client.
 func NewYep(opts ...YepOption) *Yep {
-	y := &Yep{httpClient: http.DefaultClient}
+	y := &Yep{}
 	for _, o := range opts {
 		o(y)
 	}
@@ -37,6 +38,9 @@ func NewYep(opts ...YepOption) *Yep {
 
 // Search implements Provider. Queries Yep via JSON API.
 func (y *Yep) Search(ctx context.Context, query string, opts SearchOpts) ([]Result, error) {
+	if y.browser == nil {
+		return nil, errors.New("yep: BrowserDoer is required (use WithYepBrowser)")
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -50,26 +54,17 @@ func (y *Yep) Search(ctx context.Context, query string, opts SearchOpts) ([]Resu
 		"type":       {"web"},
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, yepEndpoint+"?"+args.Encode(), nil)
-	if err != nil {
-		return nil, fmt.Errorf("yep: build request: %w", err)
-	}
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Referer", "https://yep.com/")
+	u := yepEndpoint + "?" + args.Encode()
+	headers := ChromeHeaders()
+	headers["accept"] = "application/json"
+	headers["referer"] = "https://yep.com/"
 
-	resp, err := y.httpClient.Do(req)
+	data, _, status, err := y.browser.Do(http.MethodGet, u, headers, nil)
 	if err != nil {
 		return nil, fmt.Errorf("yep request: %w", err)
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("yep status %d", resp.StatusCode)
-	}
-
-	data, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20)) //nolint:mnd
-	if err != nil {
-		return nil, fmt.Errorf("yep read body: %w", err)
+	if status != http.StatusOK {
+		return nil, fmt.Errorf("yep status %d", status)
 	}
 
 	results, err := ParseYepJSON(data)
