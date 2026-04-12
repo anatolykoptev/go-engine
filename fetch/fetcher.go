@@ -142,7 +142,7 @@ func (f *Fetcher) FetchBody(ctx context.Context, url string) ([]byte, error) {
 	}
 
 	body, err := f.fetchPrimary(ctx, url, permanent)
-	body, err = f.tryFallbacks(url, body, err)
+	body, err = f.tryFallbacks(ctx, url, body, err)
 
 	if f.retryTracker != nil {
 		if err != nil {
@@ -174,9 +174,10 @@ func (f *Fetcher) fetchPrimary(ctx context.Context, url string, permanent bool) 
 
 // tryFallbacks runs the fallback chain when the primary fetch fails.
 // Order: ox-browser → go-browser /render → legacy Byparr.
-func (f *Fetcher) tryFallbacks(url string, body []byte, err error) ([]byte, error) {
+// Each fallback gets the shorter of its own timeout or the parent context deadline.
+func (f *Fetcher) tryFallbacks(ctx context.Context, url string, body []byte, err error) ([]byte, error) {
 	if err != nil && f.oxBrowserURL != "" {
-		obCtx, obCancel := context.WithTimeout(context.Background(), oxBrowserTimeout+5*time.Second)
+		obCtx, obCancel := childTimeout(ctx, oxBrowserTimeout+5*time.Second)
 		defer obCancel()
 		if fallback, obErr := f.fetchViaOxBrowser(obCtx, url); obErr == nil {
 			return fallback, nil
@@ -184,7 +185,10 @@ func (f *Fetcher) tryFallbacks(url string, body []byte, err error) ([]byte, erro
 	}
 
 	if err != nil && f.goBrowserURL != "" {
-		gbCtx, gbCancel := context.WithTimeout(context.Background(), goBrowserTimeout)
+		if ctx.Err() != nil {
+			return body, err
+		}
+		gbCtx, gbCancel := childTimeout(ctx, goBrowserTimeout)
 		defer gbCancel()
 		if fallback, gbErr := f.fetchViaGoBrowser(gbCtx, url); gbErr == nil {
 			return fallback, nil
@@ -192,7 +196,10 @@ func (f *Fetcher) tryFallbacks(url string, body []byte, err error) ([]byte, erro
 	}
 
 	if err != nil && f.byparrURL != "" {
-		fbCtx, fbCancel := context.WithTimeout(context.Background(), byparrTimeout)
+		if ctx.Err() != nil {
+			return body, err
+		}
+		fbCtx, fbCancel := childTimeout(ctx, byparrTimeout)
 		defer fbCancel()
 		if fallback, fbErr := f.fetchViaByparr(fbCtx, url); fbErr == nil {
 			return fallback, nil
@@ -200,6 +207,17 @@ func (f *Fetcher) tryFallbacks(url string, body []byte, err error) ([]byte, erro
 	}
 
 	return body, err
+}
+
+// childTimeout returns a context with the shorter of maxDur or the parent's remaining deadline.
+func childTimeout(parent context.Context, maxDur time.Duration) (context.Context, context.CancelFunc) {
+	if deadline, ok := parent.Deadline(); ok {
+		remaining := time.Until(deadline)
+		if remaining < maxDur {
+			return context.WithTimeout(parent, remaining)
+		}
+	}
+	return context.WithTimeout(parent, maxDur)
 }
 
 // HasProxy reports whether the fetcher has a proxy-backed BrowserClient.
