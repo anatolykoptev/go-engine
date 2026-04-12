@@ -95,8 +95,16 @@ func runReddit(ctx context.Context, cfg DirectConfig, query string) ([]sources.R
 // Returns merged results from all direct sources. Failures are non-fatal.
 func SearchDirect(ctx context.Context, cfg DirectConfig, query, language string) []sources.Result {
 	if cfg.Browser == nil {
+		slog.Info("search direct: browser nil, skipping all scrapers")
 		return nil
 	}
+	slog.Info("search direct: starting",
+		slog.Bool("ddg", cfg.DDG),
+		slog.Bool("startpage", cfg.Startpage),
+		slog.Bool("brave", cfg.Brave),
+		slog.Bool("reddit", cfg.Reddit),
+		slog.Bool("yandex", cfg.Yandex.APIKey != ""),
+	)
 
 	var wg sync.WaitGroup
 	var mu sync.Mutex
