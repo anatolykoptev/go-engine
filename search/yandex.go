@@ -32,12 +32,12 @@ func SearchYandexAPI(ctx context.Context, cfg YandexConfig, query, region string
 	if err != nil {
 		return nil, err
 	}
-	return wsToSourceResults(ws), nil
+	return ws, nil
 }
 
 // ParseYandexXML extracts search results from Yandex Search API XML response.
 // Delegates to websearch.ParseYandexXML.
 func ParseYandexXML(data []byte) ([]sources.Result, error) {
 	ws, err := websearch.ParseYandexXML(data)
-	return wsToSourceResults(ws), err
+	return ws, err
 }

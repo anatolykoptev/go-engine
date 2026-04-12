@@ -8,5 +8,5 @@ import (
 // ResultsToMarkdown formats search results as numbered markdown for LLM consumption.
 // Delegates to websearch.ResultsToMarkdown.
 func ResultsToMarkdown(results []sources.Result) string {
-	return websearch.ResultsToMarkdown(sourceToWSResults(results))
+	return websearch.ResultsToMarkdown(results)
 }

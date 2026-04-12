@@ -21,5 +21,5 @@ func SearchRedditDirect(ctx context.Context, bc BrowserDoer, query string, m *me
 	if err != nil {
 		return nil, err
 	}
-	return wsToSourceResults(ws), nil
+	return ws, nil
 }

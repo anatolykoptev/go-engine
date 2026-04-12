@@ -64,7 +64,7 @@ func (s *SearXNG) SearchQuery(ctx context.Context, q sources.Query) ([]sources.R
 	if err != nil {
 		return nil, err
 	}
-	return wsToSourceResults(ws), nil
+	return ws, nil
 }
 
 // Search queries SearXNG and returns results.
@@ -76,5 +76,5 @@ func (s *SearXNG) Search(ctx context.Context, query, language, timeRange, engine
 	if err != nil {
 		return nil, err
 	}
-	return wsToSourceResults(ws), nil
+	return ws, nil
 }

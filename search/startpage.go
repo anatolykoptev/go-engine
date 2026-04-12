@@ -22,12 +22,12 @@ func SearchStartpageDirect(ctx context.Context, bc BrowserDoer, query, language 
 	if err != nil {
 		return nil, err
 	}
-	return wsToSourceResults(ws), nil
+	return ws, nil
 }
 
 // ParseStartpageHTML extracts search results from Startpage HTML response.
 // Delegates to websearch.ParseStartpageHTML.
 func ParseStartpageHTML(data []byte) ([]sources.Result, error) {
 	ws, err := websearch.ParseStartpageHTML(data)
-	return wsToSourceResults(ws), err
+	return ws, err
 }

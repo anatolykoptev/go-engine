@@ -21,5 +21,5 @@ func SearchBingDirect(ctx context.Context, bc BrowserDoer, query string, m *metr
 	if err != nil {
 		return nil, err
 	}
-	return wsToSourceResults(ws), nil
+	return ws, nil
 }
