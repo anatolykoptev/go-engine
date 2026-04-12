@@ -11,6 +11,7 @@ func FilterByScore(results []sources.Result, minScore float64, minKeep int) []so
 }
 
 // DedupByDomain limits results to maxPerDomain per domain.
-func DedupByDomain(results []sources.Result, maxPerDomain int) []sources.Result {
-	return websearch.DedupByDomain(results, maxPerDomain)
+// High-score results (score >= highScoreThreshold) bypass the per-domain limit.
+func DedupByDomain(results []sources.Result, maxPerDomain int, highScoreThreshold ...float64) []sources.Result {
+	return websearch.DedupByDomain(results, maxPerDomain, highScoreThreshold...)
 }

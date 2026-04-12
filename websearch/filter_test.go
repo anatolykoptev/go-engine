@@ -64,6 +64,34 @@ func TestDedupByDomain_SinglePerDomain(t *testing.T) {
 	}
 }
 
+func TestDedupByDomain_HighScoreBypass(t *testing.T) {
+	results := []Result{
+		{Title: "A1", URL: "http://stackoverflow.com/q/1", Score: 0.95},
+		{Title: "A2", URL: "http://stackoverflow.com/q/2", Score: 0.90},
+		{Title: "A3", URL: "http://stackoverflow.com/q/3", Score: 0.85},
+		{Title: "A4", URL: "http://stackoverflow.com/q/4", Score: 0.50},
+		{Title: "B1", URL: "http://other.com/x", Score: 0.70},
+	}
+	// maxPerDomain=2, highScore=0.80 → A1,A2,A3 bypass (score≥0.80), A4 blocked (3rd low-score), B1 passes
+	deduped := DedupByDomain(results, 2, 0.80)
+	if len(deduped) != 4 {
+		t.Fatalf("got %d, want 4 (3 high-score bypass + 1 other)", len(deduped))
+	}
+}
+
+func TestDedupByDomain_NoBypassWhenZero(t *testing.T) {
+	results := []Result{
+		{Title: "A1", URL: "http://example.com/a", Score: 0.95},
+		{Title: "A2", URL: "http://example.com/b", Score: 0.90},
+		{Title: "A3", URL: "http://example.com/c", Score: 0.85},
+	}
+	// threshold=0 (default) → strict mode, no bypass
+	deduped := DedupByDomain(results, 2)
+	if len(deduped) != 2 {
+		t.Fatalf("got %d, want 2 (strict mode, no bypass)", len(deduped))
+	}
+}
+
 func TestDedupByDomain_InvalidURL(t *testing.T) {
 	results := []Result{
 		{Title: "Good", URL: "http://example.com/a"},
