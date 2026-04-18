@@ -1,10 +1,10 @@
 # go-engine Architecture
 
-> Shared engine module for go-* MCP services.
+> AI-ready web stack for Go — search, fetch, extract, chunk, rank.
 
 ## Overview
 
-go-engine extracts the common `internal/engine/` code duplicated across go-search, go-job, and go-startup into a single Go module. Each service becomes a thin MCP tool layer on top of go-engine.
+go-engine provides a composable set of packages for building search and content-extraction pipelines. Services import go-engine as a library and compose the packages they need.
 
 ## Package Dependency Graph
 
@@ -74,9 +74,9 @@ extractor := extract.NewChain() // default: trafilatura → goquery → regex
 searchEngine := search.NewSearXNG("http://searxng:8080")
 
 llmClient := llm.New(
-    llm.WithAPIBase("http://cliproxyapi:8317/v1"),
+    llm.WithAPIBase("https://api.openai.com/v1"),
     llm.WithAPIKey(key),
-    llm.WithModel("gemini-2.5-flash"),
+    llm.WithModel("gpt-4o-mini"),
 )
 ```
 
