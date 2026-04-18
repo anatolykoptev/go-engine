@@ -9,7 +9,10 @@ import (
 	"github.com/anatolykoptev/go-engine/websearch"
 )
 
-const metricSearchRequests = "search_requests"
+const (
+	metricSearchRequests = "search_requests_total"
+	metricSearchErrors   = "search_errors_total"
+)
 
 // SearXNG queries a local SearXNG instance for search results.
 // Wraps websearch.SearXNG with go-engine metrics support.
