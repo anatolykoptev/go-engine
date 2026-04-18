@@ -29,7 +29,7 @@ github.com/alicebob/miniredis/v2/metro
 github.com/alicebob/miniredis/v2/proto
 github.com/alicebob/miniredis/v2/server
 github.com/alicebob/miniredis/v2/size
-# github.com/anatolykoptev/go-kit v0.19.0
+# github.com/anatolykoptev/go-kit v0.20.1
 ## explicit; go 1.26
 github.com/anatolykoptev/go-kit/llm
 github.com/anatolykoptev/go-kit/metrics

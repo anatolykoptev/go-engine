@@ -6,7 +6,7 @@ require (
 	github.com/JohannesKaufmann/html-to-markdown/v2 v2.5.0
 	github.com/PuerkitoBio/goquery v1.11.0
 	github.com/alicebob/miniredis/v2 v2.37.0
-	github.com/anatolykoptev/go-kit v0.19.0
+	github.com/anatolykoptev/go-kit v0.20.1
 	github.com/anatolykoptev/go-stealth v1.13.0
 	github.com/markusmobius/go-trafilatura v1.12.2
 	golang.org/x/net v0.51.0
