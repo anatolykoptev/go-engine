@@ -23,6 +23,7 @@ type BrowserDoer interface {
 // DirectConfig controls the SearchDirect fan-out behavior.
 type DirectConfig struct {
 	Browser          BrowserDoer
+	FallbackBrowser  BrowserDoer // optional: used when Browser fails on proxy-quota/gateway statuses (402/407/5xx)
 	DDG              bool
 	Startpage        bool
 	Brave            bool
@@ -54,7 +55,10 @@ func SearchDirect(ctx context.Context, cfg DirectConfig, query, language string)
 		slog.Bool("bing", cfg.Bing),
 		slog.Bool("yep", cfg.Yep),
 		slog.Bool("yandex", cfg.Yandex.APIKey != ""),
+		slog.Bool("fallback_browser", cfg.FallbackBrowser != nil),
 	)
+
+	cfg.Browser = newDualBrowser(cfg.Browser, cfg.FallbackBrowser)
 
 	var wg sync.WaitGroup
 	var mu sync.Mutex
