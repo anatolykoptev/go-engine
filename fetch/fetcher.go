@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	neturl "net/url"
 	"time"
 
 	stealth "github.com/anatolykoptev/go-stealth"
@@ -51,15 +52,12 @@ type stealthDoer interface {
 	DoCtx(ctx context.Context, method, urlStr string, headers map[string]string, body io.Reader) ([]byte, map[string]string, int, error)
 }
 
-// directDoer is an alias kept for clarity; same interface.
-type directDoer = stealthDoer
-
 // Fetcher retrieves HTTP response bodies with optional proxy routing.
 type Fetcher struct {
 	httpClient        *http.Client
 	browserClient     *stealth.BrowserClient
 	proxyClient       stealthDoer // proxy-tier doer; set to browserClient in New(), injectable in tests
-	directClient      directDoer  // Chrome TLS, no proxy — used for direct-first tier; *stealth.BrowserClient in prod, mock in tests
+	directClient      stealthDoer // Chrome TLS, no proxy — used for direct-first tier; *stealth.BrowserClient in prod, mock in tests
 	retryConfig       RetryConfig
 	retryTracker      *stealth.RetryTracker
 	proxyPool         proxypool.ProxyPool    // deferred: used to build browserClient in New()
@@ -125,8 +123,11 @@ func WithProxyFirstHosts(hosts []string) Option {
 		if f.proxyFirstDomains == nil {
 			f.proxyFirstDomains = NewProxyFirstDomains(hosts)
 		} else {
-			// Merge — re-create with existing + new.
-			f.proxyFirstDomains = NewProxyFirstDomains(append(hosts, defaultProxyFirstHosts...))
+			// Merge into a fresh slice to avoid mutating caller's backing array.
+			merged := make([]string, 0, len(hosts)+len(defaultProxyFirstHosts))
+			merged = append(merged, hosts...)
+			merged = append(merged, defaultProxyFirstHosts...)
+			f.proxyFirstDomains = NewProxyFirstDomains(merged)
 		}
 	}
 }
@@ -280,7 +281,10 @@ func (f *Fetcher) fetchDirectFirst(ctx context.Context, url string) ([]byte, err
 	}
 
 	// 2. blockCache hit → skip direct, go straight to proxy.
-	host := urlHost(url)
+	var host string
+	if u, err := neturl.Parse(url); err == nil {
+		host = u.Host
+	}
 	if f.blockCache != nil && f.blockCache.IsBlocked(host) {
 		return f.fetchViaProxyOrHTTP(ctx, url)
 	}
@@ -308,7 +312,15 @@ func (f *Fetcher) fetchDirectFirst(ctx context.Context, url string) ([]byte, err
 		return f.fetchViaProxy(ctx, url)
 	}
 
-	// No proxy budget — return direct error.
+	// No proxy budget — handling depends on signal strength:
+	// - sigSoft: body is real content (suspect but not a hard error); return it
+	//   and let the caller decide. Returning HttpStatusError{200} would be
+	//   semantically confusing (200 OK as error).
+	// - sigTLS: connection-level failure; return the original transport error.
+	// - sigHard: hard block; return an HttpStatusError with the actual status.
+	if sig == sigSoft {
+		return body, nil
+	}
 	if directErr != nil {
 		return nil, directErr
 	}
@@ -439,42 +451,6 @@ func (f *Fetcher) fetchDirectRaw(ctx context.Context, fetchURL string) (body []b
 	}
 
 	return data, h, respStatus, nil
-}
-
-// urlHost extracts the host from a raw URL string without allocating a full url.URL.
-func urlHost(rawURL string) string {
-	i := indexAfterScheme(rawURL)
-	if i < 0 {
-		return ""
-	}
-	rest := rawURL[i:]
-	if j := indexByteStr(rest, '/'); j >= 0 {
-		return rest[:j]
-	}
-	return rest
-}
-
-// schemeDelimLen is the length of the "://" scheme delimiter.
-const schemeDelimLen = 3
-
-// indexAfterScheme returns the index after "://" in rawURL, or -1.
-func indexAfterScheme(s string) int {
-	for i := 0; i+2 < len(s); i++ {
-		if s[i] == ':' && s[i+1] == '/' && s[i+2] == '/' {
-			return i + schemeDelimLen
-		}
-	}
-	return -1
-}
-
-// indexByteStr returns the index of b in s, or -1.
-func indexByteStr(s string, b byte) int {
-	for i := range len(s) {
-		if s[i] == b {
-			return i
-		}
-	}
-	return -1
 }
 
 // errNoDirectClient is returned when fetchDirectRaw is called without a directClient.

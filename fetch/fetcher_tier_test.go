@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -116,9 +117,9 @@ func Test_DirectFirst_403_EscalatesToProxy(t *testing.T) {
 	}
 
 	// blockCache must have marked the host.
-	host := urlHost(testURL)
-	if !f.blockCache.IsBlocked(host) {
-		t.Errorf("host %q not marked in blockCache after 403", host)
+	u, _ := url.Parse(testURL)
+	if !f.blockCache.IsBlocked(u.Host) {
+		t.Errorf("host %q not marked in blockCache after 403", u.Host)
 	}
 }
 
@@ -292,6 +293,11 @@ func Test_LegacyMode_ProxyFirst(t *testing.T) {
 	fDefault.proxyClient = proxy
 	fExplicit.proxyClient = proxy
 
+	// Inject a direct doer — must NOT be invoked in legacy mode.
+	directSpy := &fakeDoer{}
+	fDefault.directClient = directSpy
+	fExplicit.directClient = directSpy
+
 	bodyDefault, errDefault := fDefault.FetchBody(context.Background(), "https://example.com/")
 	if errDefault != nil {
 		t.Fatalf("default: %v", errDefault)
@@ -309,11 +315,102 @@ func Test_LegacyMode_ProxyFirst(t *testing.T) {
 		t.Errorf("body = %q, want %q", bodyDefault, wantBody)
 	}
 
-	// directClient must be nil in legacy mode.
-	if fDefault.directClient != nil {
-		t.Error("directClient should be nil in legacy mode (default)")
+	// Direct path must never be invoked in legacy mode (true regression guard).
+	if got := directSpy.calls.Load(); got != 0 {
+		t.Errorf("directClient called %d times in legacy mode, want 0", got)
 	}
-	if fExplicit.directClient != nil {
-		t.Error("directClient should be nil in legacy mode (explicit false)")
+}
+
+// Test 8: Body with mixed-case CF marker → sigHard (case-insensitive check).
+func Test_DirectFirst_CFChallenge_Detected_CaseInsensitive(t *testing.T) {
+	wantBody := largeHTML("real content from proxy")
+
+	direct := &fakeDoer{
+		status: http.StatusOK,
+		// Mixed-case CF challenge title — real anti-bot pages vary casing.
+		body: []byte(`<html><head><title>Just A Moment...</title></head><body>` +
+			`<p>Checking your browser before accessing.</p></body></html>`),
+		hdrs: map[string]string{"content-type": "text/html"},
+	}
+	proxy := &fakeDoer{
+		status: http.StatusOK,
+		body:   wantBody,
+		hdrs:   map[string]string{"content-type": "text/html"},
+	}
+
+	f := newDirectFirstBase()
+	f.directClient = direct
+	f.proxyClient = proxy
+
+	body, err := f.FetchBody(context.Background(), "https://cf-mixed.example.com/")
+	if err != nil {
+		t.Fatalf("FetchBody: %v", err)
+	}
+	if string(body) != string(wantBody) {
+		t.Errorf("body = %q, want %q", body, wantBody)
+	}
+	if got := direct.calls.Load(); got != 1 {
+		t.Errorf("direct called %d times, want 1", got)
+	}
+	if got := proxy.calls.Load(); got != 1 {
+		t.Errorf("proxy called %d times, want 1 (should escalate)", got)
+	}
+}
+
+// Test 9: HTTP 401 from direct → treated as sigHard, escalates to proxy.
+func Test_DirectFirst_401_EscalatesToProxy(t *testing.T) {
+	wantBody := largeHTML("proxy response after 401")
+
+	direct := &fakeDoer{
+		status: http.StatusUnauthorized,
+		body:   []byte("unauthorized"),
+		hdrs:   map[string]string{},
+	}
+	proxy := &fakeDoer{
+		status: http.StatusOK,
+		body:   wantBody,
+		hdrs:   map[string]string{"content-type": "text/html"},
+	}
+
+	f := newDirectFirstBase()
+	f.directClient = direct
+	f.proxyClient = proxy
+
+	body, err := f.FetchBody(context.Background(), "https://auth-guarded.example.com/page")
+	if err != nil {
+		t.Fatalf("FetchBody: %v", err)
+	}
+	if string(body) != string(wantBody) {
+		t.Errorf("body = %q, want %q", body, wantBody)
+	}
+	if got := direct.calls.Load(); got != 1 {
+		t.Errorf("direct called %d times, want 1", got)
+	}
+	if got := proxy.calls.Load(); got != 1 {
+		t.Errorf("proxy called %d times, want 1", got)
+	}
+}
+
+// Test 10: sigSoft (200 OK + tiny HTML) without proxy budget → returns body + nil, not error.
+func Test_DirectFirst_SoftBlock_NoProxy_ReturnsBody(t *testing.T) {
+	// Tiny HTML body under softBlockBodyThreshold — triggers sigSoft.
+	softBody := []byte("<html><body>minimal</body></html>")
+
+	direct := &fakeDoer{
+		status: http.StatusOK,
+		body:   softBody,
+		hdrs:   map[string]string{"content-type": "text/html"},
+	}
+
+	f := newDirectFirstBase()
+	f.directClient = direct
+	// proxyClient remains nil — no proxy budget.
+
+	body, err := f.FetchBody(context.Background(), "https://suspect.example.com/page")
+	if err != nil {
+		t.Fatalf("expected body+nil for sigSoft without proxy, got err: %v", err)
+	}
+	if string(body) != string(softBody) {
+		t.Errorf("body = %q, want %q", body, softBody)
 	}
 }

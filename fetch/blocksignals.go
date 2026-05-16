@@ -22,14 +22,18 @@ const softBlockBodyThreshold = 512
 
 // classifyBlock inspects a response and returns the appropriate block signal.
 // Called after a direct (no-proxy) fetch to decide whether to escalate to proxy.
+//
+// Body marker checks are performed on a lowercased copy to handle mixed-case
+// anti-bot HTML (e.g. "DataDome", "_pxAppId", "Just A Moment").
 func classifyBlock(status int, hdrs http.Header, body []byte, err error) blockSig {
 	if err != nil {
 		return sigTLS
 	}
 
 	switch status {
-	case http.StatusForbidden,       // 403
-		http.StatusTooManyRequests,   // 429
+	case http.StatusUnauthorized,      // 401
+		http.StatusForbidden,          // 403
+		http.StatusTooManyRequests,    // 429
 		http.StatusServiceUnavailable: // 503
 		return sigHard
 	}
@@ -39,34 +43,37 @@ func classifyBlock(status int, hdrs http.Header, body []byte, err error) blockSi
 		return sigHard
 	}
 
+	// Body checks: lowercase once, reuse for all marker comparisons.
+	bodyLower := bytes.ToLower(body)
+
 	// Cloudflare: challenge body markers
-	if hdrs.Get("server") == "cloudflare" && bytes.Contains(body, []byte("__cf_chl")) {
+	if hdrs.Get("server") == "cloudflare" && bytes.Contains(bodyLower, []byte("__cf_chl")) {
 		return sigHard
 	}
-	if bytes.Contains(body, []byte("Just a moment...")) {
+	if bytes.Contains(bodyLower, []byte("just a moment")) {
 		return sigHard
 	}
 
 	// PerimeterX
-	if bytes.Contains(body, []byte("px-captcha")) {
+	if bytes.Contains(bodyLower, []byte("px-captcha")) {
 		return sigHard
 	}
-	if bytes.Contains(body, []byte("_pxAppId")) {
+	if bytes.Contains(bodyLower, []byte("_pxappid")) {
 		return sigHard
 	}
 
 	// DataDome
-	if bytes.Contains(body, []byte("datadome")) {
+	if bytes.Contains(bodyLower, []byte("datadome")) {
 		return sigHard
 	}
 
 	// Imperva / Incapsula
-	if bytes.Contains(body, []byte("_Incapsula_Resource")) {
+	if bytes.Contains(bodyLower, []byte("_incapsula_resource")) {
 		return sigHard
 	}
 
 	// Akamai
-	if bytes.Contains(body, []byte("akamai-bot-manager")) {
+	if bytes.Contains(bodyLower, []byte("akamai-bot-manager")) {
 		return sigHard
 	}
 

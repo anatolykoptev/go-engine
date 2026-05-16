@@ -11,13 +11,14 @@ const defaultBlockTTL = 10 * time.Minute
 // defaultBlockCacheCap is the maximum number of hosts tracked.
 const defaultBlockCacheCap = 1024
 
-// DirectBlockCache is an in-process LRU-bounded cache of hosts known to block
+// DirectBlockCache is an in-process cache of hosts known to block
 // direct (no-proxy) requests. Repeat calls within the TTL skip the direct
 // attempt and go straight to proxy.
 //
-// LRU eviction: when capacity is reached, the oldest entry (by insertion order)
-// is removed. A map + insertion-order slice is used; a full LRU heap would add
-// complexity without meaningful benefit at 1024 entries.
+// Eviction: FIFO (insertion-order), not access-recency LRU. When capacity is
+// reached, the oldest-inserted entry is removed regardless of recent access.
+// A map + insertion-order slice is used; a full LRU heap would add complexity
+// without meaningful benefit at 1024 entries.
 type DirectBlockCache struct {
 	mu    sync.Mutex
 	items map[string]time.Time // host → unblock-at
