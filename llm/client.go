@@ -25,6 +25,9 @@ type Client struct {
 	temperature float64
 	maxTokens   int
 	metrics     *metrics.Registry
+	// disabled is set by NewOptional when no API key is configured.
+	// When true, all Complete* methods short-circuit to ErrUnavailable.
+	disabled bool
 }
 
 // Option configures a Client.
@@ -101,11 +104,17 @@ func New(opts ...Option) *Client {
 
 // Complete sends a prompt using the configured temperature and max_tokens.
 func (c *Client) Complete(ctx context.Context, prompt string) (string, error) {
+	if c.disabled {
+		return "", ErrUnavailable
+	}
 	return c.CompleteParams(ctx, prompt, c.temperature, c.maxTokens)
 }
 
 // CompleteParams sends a prompt with explicit temperature and maxTokens.
 func (c *Client) CompleteParams(ctx context.Context, prompt string, temperature float64, maxTokens int) (string, error) {
+	if c.disabled {
+		return "", ErrUnavailable
+	}
 	var raw string
 	err := metrics.TrackCall(c.metrics, "llm_calls_total", "llm_errors_total", func() error {
 		var e error
@@ -124,6 +133,9 @@ func (c *Client) CompleteParams(ctx context.Context, prompt string, temperature 
 // CompleteWithSystem sends a prompt with an explicit system message.
 // Empty system string omits the system message (same as Complete).
 func (c *Client) CompleteWithSystem(ctx context.Context, system, prompt string) (string, error) {
+	if c.disabled {
+		return "", ErrUnavailable
+	}
 	var raw string
 	err := metrics.TrackCall(c.metrics, "llm_calls_total", "llm_errors_total", func() error {
 		var e error
