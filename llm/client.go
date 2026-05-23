@@ -38,6 +38,7 @@ type config struct {
 	apiKey      string
 	fallbacks   []string
 	model       string
+	modelChain  []string
 	temperature float64
 	maxTokens   int
 	metrics     *metrics.Registry
@@ -61,6 +62,23 @@ func WithAPIKeyFallbacks(keys []string) Option {
 // WithModel sets the LLM model name.
 func WithModel(model string) Option {
 	return func(c *config) { c.model = model }
+}
+
+// WithModelFallbackChain sets a cross-provider model fallback chain.
+// При rate-limit/недоступности primary model клиент пробует следующие
+// модели из chain (с одним baseURL+apiKey, разными model id).
+//
+// Use case: cliproxyapi на :8317 с одним CLI_PROXY_API_KEY роутит к
+// gemini/cerebras/groq/openrouter по model id. Chain даёт cross-provider
+// failure-domain — Google outage walk'ает к Cerebras, Cerebras 429 → Groq.
+//
+// Implementation: делегирует kitllm.WithEndpoints + BuildModelChainEndpoints.
+// ВАЖНО: WithEndpoints в go-kit отключает rotation через WithFallbackKeys —
+// либо chain моделей либо chain ключей, не оба одновременно.
+//
+// Pass nil или пустой slice → no-op (поведение как без option).
+func WithModelFallbackChain(chain []string) Option {
+	return func(c *config) { c.modelChain = chain }
 }
 
 // WithTemperature sets the default temperature.
@@ -89,7 +107,12 @@ func New(opts ...Option) *Client {
 	}
 
 	var kitOpts []kitllm.Option
-	if len(cfg.fallbacks) > 0 {
+	if len(cfg.modelChain) > 0 {
+		// Model chain takes precedence: kit's WithEndpoints disables
+		// WithFallbackKeys rotation, so the chain wins when both are set.
+		eps := kitllm.BuildModelChainEndpoints(cfg.apiBase, cfg.apiKey, cfg.model, cfg.modelChain)
+		kitOpts = append(kitOpts, kitllm.WithEndpoints(eps))
+	} else if len(cfg.fallbacks) > 0 {
 		kitOpts = append(kitOpts, kitllm.WithFallbackKeys(cfg.fallbacks))
 	}
 
@@ -162,6 +185,11 @@ func stripFences(s string) string {
 // ExtractJSON extracts a JSON object from LLM output that may be wrapped
 // in markdown code fences or surrounded by text.
 var ExtractJSON = kitllm.ExtractJSON
+
+// ParseModelFallbackChain парсит CSV-список моделей (например из env
+// LLM_MODEL_FALLBACK). Re-export из go-kit/llm — чтобы потребители engine
+// могли импортировать только этот пакет.
+var ParseModelFallbackChain = kitllm.ParseModelFallbackChain
 
 // currentDate returns today's date in ISO 8601 format (UTC).
 func currentDate() string {
