@@ -34,14 +34,15 @@ type Client struct {
 type Option func(*config)
 
 type config struct {
-	apiBase     string
-	apiKey      string
-	fallbacks   []string
-	model       string
-	modelChain  []string
-	temperature float64
-	maxTokens   int
-	metrics     *metrics.Registry
+	apiBase       string
+	apiKey        string
+	fallbacks     []string
+	model         string
+	modelChain    []string
+	chainObserver kitllm.EndpointAttemptObserver
+	temperature   float64
+	maxTokens     int
+	metrics       *metrics.Registry
 }
 
 // WithAPIBase sets the API base URL (e.g. "http://127.0.0.1:8317/v1").
@@ -81,6 +82,30 @@ func WithModelFallbackChain(chain []string) Option {
 	return func(c *config) { c.modelChain = chain }
 }
 
+// EndpointAttemptObserver — re-export типа из go-kit/llm чтобы consumers
+// могли импортировать только engine package.
+type EndpointAttemptObserver = kitllm.EndpointAttemptObserver
+
+// Endpoint — re-export типа из go-kit/llm для observer parameter.
+type Endpoint = kitllm.Endpoint
+
+// WithModelChainObserver регистрирует callback который fires once per
+// endpoint attempt в chain (success или failure). Endpoint.Model несёт
+// model id — caller обновляет per-model metric без middleware overhead.
+//
+// Работает только в паре с WithModelFallbackChain (без chain нет events).
+//
+//	c := engllm.New(
+//	    engllm.WithAPIBase(...), engllm.WithAPIKey(...), engllm.WithModel(...),
+//	    engllm.WithModelFallbackChain(chain),
+//	    engllm.WithModelChainObserver(func(ep engllm.Endpoint, err error) {
+//	        if err != nil { IncrModelFail(ep.Model) }
+//	    }),
+//	)
+func WithModelChainObserver(obs EndpointAttemptObserver) Option {
+	return func(c *config) { c.chainObserver = obs }
+}
+
 // WithTemperature sets the default temperature.
 func WithTemperature(t float64) Option {
 	return func(c *config) { c.temperature = t }
@@ -112,6 +137,9 @@ func New(opts ...Option) *Client {
 		// WithFallbackKeys rotation, so the chain wins when both are set.
 		eps := kitllm.BuildModelChainEndpoints(cfg.apiBase, cfg.apiKey, cfg.model, cfg.modelChain)
 		kitOpts = append(kitOpts, kitllm.WithEndpoints(eps))
+		if cfg.chainObserver != nil {
+			kitOpts = append(kitOpts, kitllm.WithEndpointAttemptObserver(cfg.chainObserver))
+		}
 	} else if len(cfg.fallbacks) > 0 {
 		kitOpts = append(kitOpts, kitllm.WithFallbackKeys(cfg.fallbacks))
 	}
