@@ -154,25 +154,30 @@ func New(opts ...Option) *Client {
 }
 
 // Complete sends a prompt using the configured temperature and max_tokens.
-func (c *Client) Complete(ctx context.Context, prompt string) (string, error) {
+// Variadic opts pass through to kit.Complete (e.g. WithChatModel for per-call
+// model override). Most callers use no opts.
+func (c *Client) Complete(ctx context.Context, prompt string, opts ...ChatOption) (string, error) {
 	if c.disabled {
 		return "", ErrUnavailable
 	}
-	return c.CompleteParams(ctx, prompt, c.temperature, c.maxTokens)
+	return c.CompleteParams(ctx, prompt, c.temperature, c.maxTokens, opts...)
 }
 
 // CompleteParams sends a prompt with explicit temperature and maxTokens.
-func (c *Client) CompleteParams(ctx context.Context, prompt string, temperature float64, maxTokens int) (string, error) {
+// Variadic opts pass through to kit.Complete after temperature/maxTokens
+// (later opts override earlier in chatConfig.apply order).
+func (c *Client) CompleteParams(ctx context.Context, prompt string, temperature float64, maxTokens int, opts ...ChatOption) (string, error) {
 	if c.disabled {
 		return "", ErrUnavailable
 	}
 	var raw string
 	err := metrics.TrackCall(c.metrics, "llm_calls_total", "llm_errors_total", func() error {
 		var e error
-		raw, e = c.kit.Complete(ctx, "", prompt,
+		kitOpts := append([]ChatOption{
 			kitllm.WithChatTemperature(temperature),
 			kitllm.WithChatMaxTokens(maxTokens),
-		)
+		}, opts...)
+		raw, e = c.kit.Complete(ctx, "", prompt, kitOpts...)
 		return e
 	})
 	if err != nil {
@@ -183,17 +188,19 @@ func (c *Client) CompleteParams(ctx context.Context, prompt string, temperature 
 
 // CompleteWithSystem sends a prompt with an explicit system message.
 // Empty system string omits the system message (same as Complete).
-func (c *Client) CompleteWithSystem(ctx context.Context, system, prompt string) (string, error) {
+// Variadic opts pass through to kit.Complete.
+func (c *Client) CompleteWithSystem(ctx context.Context, system, prompt string, opts ...ChatOption) (string, error) {
 	if c.disabled {
 		return "", ErrUnavailable
 	}
 	var raw string
 	err := metrics.TrackCall(c.metrics, "llm_calls_total", "llm_errors_total", func() error {
 		var e error
-		raw, e = c.kit.Complete(ctx, system, prompt,
+		kitOpts := append([]ChatOption{
 			kitllm.WithChatTemperature(c.temperature),
 			kitllm.WithChatMaxTokens(c.maxTokens),
-		)
+		}, opts...)
+		raw, e = c.kit.Complete(ctx, system, prompt, kitOpts...)
 		return e
 	})
 	if err != nil {
@@ -218,6 +225,20 @@ var ExtractJSON = kitllm.ExtractJSON
 // LLM_MODEL_FALLBACK). Re-export из go-kit/llm — чтобы потребители engine
 // могли импортировать только этот пакет.
 var ParseModelFallbackChain = kitllm.ParseModelFallbackChain
+
+// ChatOption — re-export типа из go-kit/llm для per-call request options.
+type ChatOption = kitllm.ChatOption
+
+// WithChatModel — re-export. Per-call model override (empty string = no
+// override). Use case: per-attempt timeout chain loop где caller iterate'ит
+// models с context.WithTimeout per attempt + WithChatModel(m) per call.
+var WithChatModel = kitllm.WithChatModel
+
+// WithChatTemperature — re-export per-call temperature override.
+var WithChatTemperature = kitllm.WithChatTemperature
+
+// WithChatMaxTokens — re-export per-call max tokens override.
+var WithChatMaxTokens = kitllm.WithChatMaxTokens
 
 // currentDate returns today's date in ISO 8601 format (UTC).
 func currentDate() string {
