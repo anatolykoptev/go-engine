@@ -93,6 +93,41 @@ func TestWithModelFallbackChain_NilOrEmpty_NoOp(t *testing.T) {
 	}
 }
 
+func TestWithModelChainObserver_FiresPerModel(t *testing.T) {
+	srv, _, _ := modelEchoServer(t, "primary-broken", "ok")
+	defer srv.Close()
+
+	type obsCall struct {
+		model string
+		ok    bool
+	}
+	var calls []obsCall
+	obs := func(ep Endpoint, err error) {
+		calls = append(calls, obsCall{model: ep.Model, ok: err == nil})
+	}
+
+	c := New(
+		WithAPIBase(srv.URL),
+		WithAPIKey("k"),
+		WithModel("primary-broken"),
+		WithModelFallbackChain([]string{"fallback"}),
+		WithModelChainObserver(obs),
+	)
+	_, err := c.Complete(context.Background(), "hi")
+	if err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	if len(calls) != 2 {
+		t.Fatalf("expected 2 observer calls (primary fail + fallback ok), got %d: %+v", len(calls), calls)
+	}
+	if calls[0].model != "primary-broken" || calls[0].ok {
+		t.Errorf("calls[0] = %+v, want {primary-broken, false}", calls[0])
+	}
+	if calls[1].model != "fallback" || !calls[1].ok {
+		t.Errorf("calls[1] = %+v, want {fallback, true}", calls[1])
+	}
+}
+
 func TestParseModelFallbackChain_Reexport(t *testing.T) {
 	got := ParseModelFallbackChain("a, b ,c,a,")
 	want := []string{"a", "b", "c"}
