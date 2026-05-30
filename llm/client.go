@@ -34,15 +34,16 @@ type Client struct {
 type Option func(*config)
 
 type config struct {
-	apiBase       string
-	apiKey        string
-	fallbacks     []string
-	model         string
-	modelChain    []string
-	chainObserver kitllm.EndpointAttemptObserver
-	temperature   float64
-	maxTokens     int
-	metrics       *metrics.Registry
+	apiBase           string
+	apiKey            string
+	fallbacks         []string
+	model             string
+	modelChain        []string
+	chainObserver     kitllm.EndpointAttemptObserver
+	perAttemptTimeout time.Duration
+	temperature       float64
+	maxTokens         int
+	metrics           *metrics.Registry
 }
 
 // WithAPIBase sets the API base URL (e.g. "http://127.0.0.1:8317/v1").
@@ -106,6 +107,16 @@ func WithModelChainObserver(obs EndpointAttemptObserver) Option {
 	return func(c *config) { c.chainObserver = obs }
 }
 
+// WithPerAttemptTimeout bounds each model attempt in the fallback chain by its
+// own deadline (derived from the caller's ctx). Only meaningful together with
+// WithModelFallbackChain. d<=0 = no per-attempt bound (default). Delegates to
+// go-kit's transport-level WithPerAttemptTimeout — the single source of truth
+// for per-attempt failover timing. One slow model can no longer starve the rest
+// of the chain.
+func WithPerAttemptTimeout(d time.Duration) Option {
+	return func(c *config) { c.perAttemptTimeout = d }
+}
+
 // WithTemperature sets the default temperature.
 func WithTemperature(t float64) Option {
 	return func(c *config) { c.temperature = t }
@@ -139,6 +150,9 @@ func New(opts ...Option) *Client {
 		kitOpts = append(kitOpts, kitllm.WithEndpoints(eps))
 		if cfg.chainObserver != nil {
 			kitOpts = append(kitOpts, kitllm.WithEndpointAttemptObserver(cfg.chainObserver))
+		}
+		if cfg.perAttemptTimeout > 0 {
+			kitOpts = append(kitOpts, kitllm.WithPerAttemptTimeout(cfg.perAttemptTimeout))
 		}
 	} else if len(cfg.fallbacks) > 0 {
 		kitOpts = append(kitOpts, kitllm.WithFallbackKeys(cfg.fallbacks))
@@ -230,8 +244,12 @@ var ParseModelFallbackChain = kitllm.ParseModelFallbackChain
 type ChatOption = kitllm.ChatOption
 
 // WithChatModel — re-export. Per-call model override (empty string = no
-// override). Use case: per-attempt timeout chain loop где caller iterate'ит
-// models с context.WithTimeout per attempt + WithChatModel(m) per call.
+// override). Use case: one-off model substitution within a single call.
+// NOTE: the per-attempt timeout chain loop pattern (caller iterates models
+// with context.WithTimeout + WithChatModel per call) is deprecated in favour
+// of WithModelFallbackChain + WithPerAttemptTimeout, which handles per-attempt
+// failover at the transport level. WithChatModel is kept for go-wowa and other
+// callers that perform per-call model substitution unrelated to failover.
 var WithChatModel = kitllm.WithChatModel
 
 // WithChatTemperature — re-export per-call temperature override.
