@@ -191,3 +191,47 @@ func TestMergeHeaders_LowercaseNormalization(t *testing.T) {
 		t.Errorf("mergeHeaders: x-custom-hdr=%q ok=%v, want 'value'", got, ok)
 	}
 }
+
+// TestFetchBodyWithHeaders_NilExtra_DirectTierPreservesLegacyAccept is a regression
+// guard: nil extra must NOT change the Accept header on the direct (Chrome-TLS) tier.
+// The legacy value is the stripped HTML accept (without image/avif,image/webp that
+// ChromeHeaders seeds) — exact string must be preserved for existing callers.
+func TestFetchBodyWithHeaders_NilExtra_DirectTierPreservesLegacyAccept(t *testing.T) {
+	const legacyAccept = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+
+	direct := &headerCapture{status: http.StatusOK, body: largeHTML("nil-extra regression")}
+
+	f := newDirectFirstBase()
+	f.directClient = direct
+
+	_, err := f.FetchBody(context.Background(), "https://example.com/page")
+	if err != nil {
+		t.Fatalf("FetchBody: %v", err)
+	}
+	if got := direct.headers["accept"]; got != legacyAccept {
+		t.Errorf("nil-extra changed direct-tier Accept:\n  got:  %q\n  want: %q", got, legacyAccept)
+	}
+}
+
+// TestFetchBodyWithHeaders_NilExtra_ProxyTierPreservesLegacyAccept is a regression
+// guard: nil extra must NOT change the Accept header on the proxy (Chrome-TLS) tier.
+func TestFetchBodyWithHeaders_NilExtra_ProxyTierPreservesLegacyAccept(t *testing.T) {
+	const legacyAccept = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+
+	// Force proxy path: directFirst=false, proxy available.
+	proxy := &headerCapture{status: http.StatusOK, body: largeHTML("proxy nil-extra regression")}
+
+	f := New(
+		WithTimeout(5*time.Second),
+		WithRetryConfig(RetryConfig{MaxRetries: 0, InitialWait: time.Millisecond, MaxWait: time.Millisecond, Multiplier: 1}),
+	)
+	f.proxyClient = proxy
+
+	_, err := f.FetchBody(context.Background(), "https://example.com/page")
+	if err != nil {
+		t.Fatalf("FetchBody via proxy: %v", err)
+	}
+	if got := proxy.headers["accept"]; got != legacyAccept {
+		t.Errorf("nil-extra changed proxy-tier Accept:\n  got:  %q\n  want: %q", got, legacyAccept)
+	}
+}

@@ -462,12 +462,13 @@ func (f *Fetcher) DirectClient() *stealth.BrowserClient {
 }
 
 // fetchViaProxy routes through the proxy-tier stealthDoer (BrowserClient with Chrome TLS fingerprint).
-// extra headers are merged over the built-in defaults; if "accept" is absent in extra the
-// standard HTML accept value is preserved.
+// extra headers are merged over the built-in Chrome defaults; caller-supplied values take
+// precedence (e.g. extra["Accept"]="application/json" overrides the legacy HTML accept).
 func (f *Fetcher) fetchViaProxy(ctx context.Context, fetchURL string, extra map[string]string) ([]byte, error) {
-	headers := mergeHeaders(extra)
-	if _, ok := headers["accept"]; !ok {
-		headers["accept"] = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+	headers := ChromeHeaders()
+	headers["accept"] = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+	for k, v := range extra {
+		headers[strings.ToLower(k)] = v
 	}
 
 	return RetryDo(ctx, f.retryConfig, func() ([]byte, error) {
@@ -517,17 +518,18 @@ func (f *Fetcher) fetchViaHTTP(ctx context.Context, fetchURL string, extra map[s
 
 // fetchDirectRaw issues a single direct request via directClient (Chrome TLS, no proxy)
 // and returns the raw response components without retry.
-// extra headers are merged over built-in Chrome defaults before sending; if "accept"
-// is absent in extra the standard HTML accept value is preserved.
+// extra headers are merged over built-in Chrome defaults before sending; caller-supplied
+// values take precedence (e.g. extra["Accept"]="application/json" overrides legacy HTML accept).
 // Returns zero values and an error on connection failure.
 func (f *Fetcher) fetchDirectRaw(ctx context.Context, fetchURL string, extra map[string]string) (body []byte, hdrs http.Header, status int, err error) {
 	if f.directClient == nil {
 		return nil, nil, 0, errNoDirectClient
 	}
 
-	headers := mergeHeaders(extra)
-	if _, ok := headers["accept"]; !ok {
-		headers["accept"] = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+	headers := ChromeHeaders()
+	headers["accept"] = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+	for k, v := range extra {
+		headers[strings.ToLower(k)] = v
 	}
 
 	data, respHdrs, respStatus, doErr := f.directClient.DoCtx(ctx, http.MethodGet, fetchURL, headers, nil)
