@@ -12,7 +12,10 @@ import (
 
 // researchFixtureSSE returns an SSE stream wrapping a research tool response
 // containing the given source URLs.
-func researchFixtureSSE(sources []struct{ index int; title, url string }) string {
+func researchFixtureSSE(sources []struct {
+	index      int
+	title, url string
+}) string {
 	// Build pipeline.SearchOutput-compatible JSON
 	type srcItem struct {
 		Index int    `json:"index"`
@@ -42,7 +45,10 @@ func researchFixtureSSE(sources []struct{ index int; title, url string }) string
 }
 
 func TestDiscover_ParsesSourceURLs(t *testing.T) {
-	sources := []struct{ index int; title, url string }{
+	sources := []struct {
+		index      int
+		title, url string
+	}{
 		{1, "Лучшие рестораны СПб - Sobaka.ru", "https://www.sobaka.ru/spb/restaurants/"},
 		{2, "ТОП кафе Санкт-Петербург - Tripadvisor", "https://www.tripadvisor.ru/Restaurants-g298507.html"},
 		{3, "Рестораны СПб - Kudago", "https://kudago.com/spb/restaurants/"},
@@ -204,5 +210,42 @@ func TestDiscover_SkipsBlankURLs(t *testing.T) {
 	}
 	if len(results) != 2 {
 		t.Errorf("expected 2 results (blank URL filtered), got %d", len(results))
+	}
+}
+
+// TestDiscover_SendsBothAcceptTypes guards the streamable-HTTP contract: the
+// go-sdk MCP server rejects POST /mcp with 400 unless Accept lists BOTH
+// application/json and text/event-stream. A prior version sent only
+// text/event-stream, 400ing every live research call (the mocks above did not
+// enforce Accept, so the bug shipped). This mock mimics the real server-side
+// enforcement so the regression cannot return silently.
+func TestDiscover_SendsBothAcceptTypes(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		accept := r.Header.Get("Accept")
+		if !strings.Contains(accept, "application/json") || !strings.Contains(accept, "text/event-stream") {
+			http.Error(w, "Accept must contain both application/json and text/event-stream", http.StatusBadRequest)
+			return
+		}
+		sources := []struct {
+			index      int
+			title, url string
+		}{
+			{1, "ProDoctorov", "https://prodoctorov.ru/spb/top/chastnaya-stomatologiya/"},
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, researchFixtureSSE(sources))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, nil)
+	c.ok.Store(true)
+
+	results, err := c.Discover(context.Background(), "стоматологии Санкт-Петербург",
+		DiscoverOpts{Source: "piternow", Depth: "fast"})
+	if err != nil {
+		t.Fatalf("Discover must send both Accept types and succeed; got: %v", err)
+	}
+	if len(results) != 1 || results[0].URL != "https://prodoctorov.ru/spb/top/chastnaya-stomatologiya/" {
+		t.Fatalf("unexpected results: %+v", results)
 	}
 }
