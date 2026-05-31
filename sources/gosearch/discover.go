@@ -68,7 +68,7 @@ func (c *Client) Discover(ctx context.Context, query string, opts DiscoverOpts) 
 		return nil, fmt.Errorf("discover: build request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "text/event-stream")
+	req.Header.Set("Accept", "application/json, text/event-stream")
 
 	resp, err := c.http.Do(req) //nolint:gosec // baseURL is server config, not user input
 	if err != nil {
