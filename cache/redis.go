@@ -1,6 +1,6 @@
 package cache
 
-import "github.com/anatolykoptev/go-stealth/webcache"
+import "github.com/anatolykoptev/go-engine/webcache"
 
 // Redis is a cache backed by Redis.
 // Delegates to webcache.Redis.

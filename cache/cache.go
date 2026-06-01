@@ -4,10 +4,10 @@
 // The [Cache] interface is implemented by [Memory], [Redis], and [Tiered].
 // [Tiered] chains L1 and L2 with automatic promotion on L2 hits.
 //
-// All implementations delegate to go-stealth/webcache for the canonical logic.
+// All implementations delegate to go-engine/webcache for the canonical logic.
 package cache
 
-import "github.com/anatolykoptev/go-stealth/webcache"
+import "github.com/anatolykoptev/go-engine/webcache"
 
 // Cache is the interface for key-value storage with TTL.
 // Identical to webcache.Cache — kept for backward compatibility.
