@@ -3,6 +3,7 @@ package imagesearch
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html"
 	"net/http"
@@ -38,7 +39,7 @@ func (y *YandexImages) Search(ctx context.Context, doer BrowserDoer, query strin
 	if err == nil && status == http.StatusOK { //nolint:nestif // relocated verbatim from go-stealth/imagesearch
 		if respHeaders["x-yandex-captcha"] != "" {
 			if y.Renderer == nil {
-				return nil, fmt.Errorf("yandex: captcha detected, renderer not configured") //nolint:perfsprint // relocated verbatim from go-stealth/imagesearch
+				return nil, errors.New("yandex: captcha detected, renderer not configured")
 			}
 			// Fall through to Chrome renderer below.
 		} else if results := parseYandexDataState(string(data)); len(results) > 0 {
@@ -51,7 +52,7 @@ func (y *YandexImages) Search(ctx context.Context, doer BrowserDoer, query strin
 
 	// Fallback to Chrome render if available.
 	if y.Renderer == nil {
-		return nil, fmt.Errorf("yandex: no results from HTTP, renderer not configured") //nolint:perfsprint // relocated verbatim from go-stealth/imagesearch
+		return nil, errors.New("yandex: no results from HTTP, renderer not configured")
 	}
 	renderedHTML, err := y.Renderer.Render(ctx, u)
 	if err != nil {

@@ -6,7 +6,7 @@ import (
 )
 
 // BrowserDoer performs HTTP requests with browser-like TLS fingerprint.
-// Identical to websearch.BrowserDoer — type alias to avoid circular import.
+// Mirrors websearch.BrowserDoer (same method set); kept independent to avoid coupling the two leaf packages.
 type BrowserDoer interface {
 	Do(method, url string, headers map[string]string, body io.Reader) ([]byte, map[string]string, int, error)
 }
