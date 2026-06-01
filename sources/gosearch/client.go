@@ -1,4 +1,4 @@
-// Package gosearch provides an MCP client for go-search's searxng_web_search tool.
+// Package gosearch provides an MCP client for go-search's MCP tools (raw_web_search, research).
 // Communicates via MCP Streamable HTTP (JSON-RPC over SSE).
 package gosearch
 
@@ -81,7 +81,7 @@ func (c *Client) CheckHealth(ctx context.Context) bool {
 	return reachable
 }
 
-// Search calls go-search's searxng_web_search tool via MCP JSON-RPC.
+// Search calls go-search's raw_web_search tool via MCP JSON-RPC.
 func (c *Client) Search(ctx context.Context, query, timeRange string) ([]Result, error) {
 	if c.baseURL == "" {
 		return nil, errors.New("go-search client not configured")
@@ -97,7 +97,7 @@ func (c *Client) Search(ctx context.Context, query, timeRange string) ([]Result,
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
-			"name":      "searxng_web_search",
+			"name":      "raw_web_search",
 			"arguments": args,
 		},
 	}
@@ -112,7 +112,7 @@ func (c *Client) Search(ctx context.Context, query, timeRange string) ([]Result,
 		return nil, fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "text/event-stream")
+	req.Header.Set("Accept", "application/json, text/event-stream")
 
 	resp, err := c.http.Do(req) //nolint:gosec // baseURL is server config, not user input
 	if err != nil {

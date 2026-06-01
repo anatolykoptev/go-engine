@@ -71,6 +71,8 @@ fetcher := fetch.New(
 
 extractor := extract.NewChain() // default: trafilatura → goquery → regex
 
+// SearXNG is optional (needs a running instance). Direct scrapers — DDG,
+// Startpage, Brave in the websearch package — work without one.
 searchEngine := search.NewSearXNG("http://searxng:8080")
 
 llmClient := llm.New(

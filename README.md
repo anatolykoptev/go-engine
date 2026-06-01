@@ -50,6 +50,9 @@ func main() {
     fetcher := fetch.New(fetch.WithTimeout(30))
     extractor := extract.NewChain()
 
+    // SearXNG is an optional provider and needs a running instance. The direct
+    // scrapers in the websearch package — DDG, Startpage, Brave — need no
+    // external service and are the production default.
     searxng := websearch.NewSearXNG("http://searxng:8080", fetcher)
     engine := search.NewFuse([]search.SearchEngine{searxng})
 
