@@ -3,7 +3,7 @@ package cache
 import (
 	"time"
 
-	"github.com/anatolykoptev/go-stealth/webcache"
+	"github.com/anatolykoptev/go-engine/webcache"
 )
 
 // Tiered chains an L1 (fast, volatile) and L2 (persistent) cache.

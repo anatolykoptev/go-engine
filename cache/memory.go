@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/anatolykoptev/go-stealth/webcache"
+	"github.com/anatolykoptev/go-engine/webcache"
 )
 
 // Memory is an in-memory cache backed by sync.Map with TTL and eviction.
