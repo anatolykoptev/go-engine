@@ -3,6 +3,7 @@ package imagesearch
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -44,7 +45,7 @@ func (d *DdgImages) Search(ctx context.Context, doer BrowserDoer, query string, 
 
 	vqd := extractVQD(string(data))
 	if vqd == "" {
-		return nil, fmt.Errorf("ddg: vqd token not found") //nolint:perfsprint // relocated verbatim from go-stealth/imagesearch
+		return nil, errors.New("ddg: vqd token not found")
 	}
 
 	// Step 2: fetch image results.
