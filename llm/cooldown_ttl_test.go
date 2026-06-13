@@ -7,15 +7,15 @@ import (
 )
 
 // TestResolveCooldownDuration_Default verifies that with no option and no env
-// the helper returns the 15m built-in default.
+// the helper returns the 5m built-in default.
 //
 // RED-on-revert: change defaultCooldownDuration to something else and this
 // test fails.
 func TestResolveCooldownDuration_Default(t *testing.T) {
 	t.Setenv("LLM_COOLDOWN_SECONDS", "")
 	got := resolveCooldownDuration(0)
-	if got != 15*time.Minute {
-		t.Errorf("default: got %v, want 15m", got)
+	if got != 5*time.Minute {
+		t.Errorf("default: got %v, want 5m", got)
 	}
 }
 
@@ -59,8 +59,8 @@ func TestResolveCooldownDuration_EnvInvalid(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Setenv("LLM_COOLDOWN_SECONDS", tt.env)
 			got := resolveCooldownDuration(0)
-			if got != 15*time.Minute {
-				t.Errorf("%s: got %v, want 15m", tt.name, got)
+			if got != 5*time.Minute {
+				t.Errorf("%s: got %v, want 5m", tt.name, got)
 			}
 		})
 	}
@@ -70,7 +70,7 @@ func TestResolveCooldownDuration_EnvInvalid(t *testing.T) {
 // proof. It drives a 2-model chain with a 2s cooldown (WithModelCooldownDuration),
 // confirms the primary is skipped after FailThreshold 429 hits, waits ~2.1s for
 // the cooldown window to expire, then confirms the primary is retried (i.e. the
-// short duration was actually wired to kit, not the 15m default).
+// short duration was actually wired to kit, not the 5m default).
 //
 // RED-on-revert: revert WithModelCooldown(CooldownConfig{}) (removing the
 // Default field) — the duration is then 60s and the ~2.1s wait does not expire
@@ -148,7 +148,7 @@ func TestCooldown_WithModelCooldownDuration_Expiry(t *testing.T) {
 
 	if primaryHits.Load() <= primaryBeforeExpiry {
 		t.Errorf("primary was NOT retried after cooldown expiry (hits before=%d after=%d) — "+
-			"duration not wired; defaulting to 15m would keep cooldown active",
+			"duration not wired; defaulting to 5m would keep cooldown active",
 			primaryBeforeExpiry, primaryHits.Load())
 	}
 	if fallbackHits.Load() <= fallbackBeforeExpiry {
