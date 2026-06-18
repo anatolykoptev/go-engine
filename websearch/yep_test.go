@@ -1,7 +1,11 @@
 package websearch
 
 import (
+	"context"
 	"encoding/json"
+	"io"
+	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -86,5 +90,35 @@ func TestParseYepJSON_SkipsEmptyURL(t *testing.T) {
 	}
 	if len(results) != 1 {
 		t.Fatalf("got %d results, want 1 (skip empty URL)", len(results))
+	}
+}
+
+// TestYep_Search_RequestEndpoint is a regression guard for the 2026-06 endpoint
+// migration: the deprecated https://api.yep.com/fs/2/search returns HTTP 501 and
+// the old q= param returns 400 on the new endpoint. This locks in the working
+// shape: path /search + param query=. See go-engine PR (yep endpoint migration).
+func TestYep_Search_RequestEndpoint(t *testing.T) {
+	var gotURL string
+	bc := &mockBrowser{fn: func(_, u string, _ map[string]string, _ io.Reader) ([]byte, map[string]string, int, error) {
+		gotURL = u
+		return []byte(`["Ok",{"results":[],"total":0}]`), nil, http.StatusOK, nil
+	}}
+
+	y := NewYep(WithYepBrowser(bc))
+	if _, err := y.Search(context.Background(), "golang context", SearchOpts{}); err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+
+	if !strings.HasPrefix(gotURL, "https://api.yep.com/search?") {
+		t.Errorf("endpoint = %q, want prefix https://api.yep.com/search?", gotURL)
+	}
+	if strings.Contains(gotURL, "/fs/2/search") {
+		t.Errorf("request still uses deprecated /fs/2/search path: %q", gotURL)
+	}
+	if !strings.Contains(gotURL, "query=golang") {
+		t.Errorf("request missing query= param (new endpoint requires it): %q", gotURL)
+	}
+	if strings.Contains(gotURL, "q=golang") {
+		t.Errorf("request still uses deprecated q= param (returns 400 on new endpoint): %q", gotURL)
 	}
 }
