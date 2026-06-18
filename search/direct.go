@@ -32,6 +32,9 @@ type DirectConfig struct {
 	Reddit           bool
 	Bing             bool
 	Yep              bool
+	Wikipedia        bool
+	Marginalia       bool
+	Mojeek           bool
 	Yandex           YandexConfig
 	Retry            fetch.RetryConfig
 	Metrics          *metrics.Registry
@@ -74,6 +77,9 @@ func SearchDirect(ctx context.Context, cfg DirectConfig, query, language string)
 		slog.Bool("bing", cfg.Bing),
 		slog.Bool("yep", cfg.Yep),
 		slog.Bool("yandex", cfg.Yandex.APIKey != ""),
+		slog.Bool("wikipedia", cfg.Wikipedia),
+		slog.Bool("marginalia", cfg.Marginalia),
+		slog.Bool("mojeek", cfg.Mojeek),
 		slog.Bool("fallback_browser", cfg.FallbackBrowser != nil),
 	)
 
@@ -115,6 +121,9 @@ func SearchDirect(ctx context.Context, cfg DirectConfig, query, language string)
 		{cfg.Yandex.APIKey != "", "yandex", func() ([]sources.Result, error) {
 			return SearchYandexAPI(ctx, cfg.Yandex, query, "", cfg.Metrics)
 		}},
+		{cfg.Wikipedia, "wikipedia", func() ([]sources.Result, error) { return runWikipedia(ctx, cfg, query, language) }},
+		{cfg.Marginalia, "marginalia", func() ([]sources.Result, error) { return runMarginalia(ctx, cfg, query) }},
+		{cfg.Mojeek, "mojeek", func() ([]sources.Result, error) { return runMojeek(ctx, cfg, query) }},
 	}
 
 	for _, j := range jobs {
