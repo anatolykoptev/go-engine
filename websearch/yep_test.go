@@ -93,7 +93,6 @@ func TestParseYepJSON_SkipsEmptyURL(t *testing.T) {
 	}
 }
 
-
 // TestYep_Search_RequestEndpoint is a regression guard for the 2026-06 endpoint
 // migration: the deprecated https://api.yep.com/fs/2/search returns HTTP 501 and
 // the old q= param returns 400 on the new endpoint. This locks in the working

@@ -8,6 +8,8 @@ import (
 
 	"golang.org/x/time/rate"
 
+	kitmetrics "github.com/anatolykoptev/go-kit/metrics"
+
 	"github.com/anatolykoptev/go-engine/fetch"
 	"github.com/anatolykoptev/go-engine/metrics"
 	"github.com/anatolykoptev/go-engine/sources"
@@ -54,7 +56,7 @@ func recordSourceResult(m *metrics.Registry, source, outcome string) {
 	if m == nil {
 		return
 	}
-	m.Incr(metricSourceResult + "{source=" + source + ",outcome=" + outcome + "}")
+	m.Incr(kitmetrics.Label(metricSourceResult, "source", source, "outcome", outcome))
 }
 
 // SearchDirect queries enabled direct scrapers in parallel.
