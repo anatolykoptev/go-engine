@@ -40,6 +40,23 @@ type DirectConfig struct {
 	BingLimiter      *rate.Limiter
 }
 
+// metricSourceResult is the per-source fan-out outcome counter. Encoded as
+// name{source=<label>,outcome=ok|fail} so the go-kit/metrics Prometheus bridge
+// surfaces it as go_search_source_result_total{source="yep",outcome="fail"}.
+//
+// Rationale: a source failing 100% (e.g. yep on the deprecated endpoint) was
+// invisible because a sibling source (yandex) silently covered the result set.
+// This counter makes a per-source failure rate alertable.
+const metricSourceResult = "go_search_source_result_total"
+
+// recordSourceResult increments the per-source outcome counter. Nil-safe.
+func recordSourceResult(m *metrics.Registry, source, outcome string) {
+	if m == nil {
+		return
+	}
+	m.Incr(metricSourceResult + "{source=" + source + ",outcome=" + outcome + "}")
+}
+
 // SearchDirect queries enabled direct scrapers in parallel.
 // Returns merged results from all direct sources. Failures are non-fatal.
 func SearchDirect(ctx context.Context, cfg DirectConfig, query, language string) []sources.Result {
@@ -66,9 +83,11 @@ func SearchDirect(ctx context.Context, cfg DirectConfig, query, language string)
 
 	collect := func(results []sources.Result, err error, label string) {
 		if err != nil {
+			recordSourceResult(cfg.Metrics, label, "fail")
 			slog.Warn("search source failed", slog.String("source", label), slog.Any("error", err))
 			return
 		}
+		recordSourceResult(cfg.Metrics, label, "ok")
 		slog.Info("search source results", slog.String("source", label), slog.Int("count", len(results)))
 		mu.Lock()
 		all = append(all, results...)
