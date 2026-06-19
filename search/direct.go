@@ -17,6 +17,14 @@ import (
 	"github.com/anatolykoptev/go-engine/websearch"
 )
 
+// defaultPerSourceTimeout is the per-source goroutine deadline (retries included)
+// used when DirectConfig.PerSourceTimeout is zero.
+const defaultPerSourceTimeout = 6 * time.Second
+
+// defaultEarlyReturnAt is the result-count threshold that triggers early
+// cancellation when DirectConfig.EarlyReturnAt is zero.
+const defaultEarlyReturnAt = 10
+
 // BrowserDoer performs HTTP requests with browser-like TLS fingerprint.
 // *stealth.BrowserClient satisfies this interface.
 type BrowserDoer interface {
@@ -46,11 +54,14 @@ type DirectConfig struct {
 	BingLimiter      *rate.Limiter
 
 	// PerSourceTimeout caps each source goroutine (retries included).
-	// Default 6s when zero.
+	// Default defaultPerSourceTimeout (6s) when zero.
 	PerSourceTimeout time.Duration
 
 	// EarlyReturnAt returns as soon as this many results are collected
-	// across all sources. 0 = 10 default.
+	// across all sources. Trades completeness for lower tail latency: a
+	// caller wanting maximum result coverage should set this high and rely
+	// on PerSourceTimeout to bound the overall wall-clock time instead.
+	// Default defaultEarlyReturnAt (10) when zero.
 	EarlyReturnAt int
 }
 
@@ -72,6 +83,13 @@ type directJob struct {
 // runSourceWithTimeout executes fn inside a goroutine that is capped by srcCtx.
 // It sends the result to ch once fn completes or srcCtx is cancelled (whichever
 // comes first), so a blocked BrowserDoer.Do call cannot exceed the timeout.
+//
+// Goroutine lifetime note: the inner goroutine that calls fn may outlive srcCtx
+// cancellation if the BrowserDoer.Do implementation does not respect context
+// cancellation promptly. It is bounded in practice by the HTTP client Timeout
+// (~15 s for the stealth client), so it cannot run indefinitely. done MUST remain
+// buffered (cap >= 1) so that when runSourceWithTimeout returns on the srcCtx.Done
+// branch the inner goroutine can still send without blocking forever.
 func runSourceWithTimeout(srcCtx context.Context, label string, fn func(context.Context) ([]sources.Result, error), ch chan<- directResult) {
 	start := time.Now()
 	type fnResult struct {
@@ -137,11 +155,11 @@ func SearchDirect(ctx context.Context, cfg DirectConfig, query, language string)
 
 	perSrc := cfg.PerSourceTimeout
 	if perSrc == 0 {
-		perSrc = 6 * time.Second
+		perSrc = defaultPerSourceTimeout
 	}
 	earlyAt := cfg.EarlyReturnAt
 	if earlyAt == 0 {
-		earlyAt = 10
+		earlyAt = defaultEarlyReturnAt
 	}
 
 	// allDoneCtx is cancelled when enough results accumulate (early-return path).
@@ -211,6 +229,7 @@ func SearchDirect(ctx context.Context, cfg DirectConfig, query, language string)
 // early-return cancellation once earlyAt results are collected.
 func collectResults(ch <-chan directResult, m *metrics.Registry, earlyAt int, cancel context.CancelFunc) []sources.Result {
 	var all []sources.Result
+	var cancelled bool
 	for r := range ch {
 		if m != nil {
 			m.ObserveSeconds(
@@ -226,8 +245,9 @@ func collectResults(ch <-chan directResult, m *metrics.Registry, earlyAt int, ca
 		recordSourceResult(m, r.label, "ok")
 		slog.Info("search source results", slog.String("source", r.label), slog.Int("count", len(r.results)))
 		all = append(all, r.results...)
-		if len(all) >= earlyAt {
+		if !cancelled && len(all) >= earlyAt {
 			cancel()
+			cancelled = true
 		}
 	}
 	return all
