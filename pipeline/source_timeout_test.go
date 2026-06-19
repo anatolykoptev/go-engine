@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"runtime"
 	"testing"
 	"time"
 
@@ -113,32 +114,74 @@ func TestSearchSources_EarlyReturn(t *testing.T) {
 }
 
 // TestRunPipelineSourceWithTimeout_BufferedChannelInvariant verifies that
-// runPipelineSourceWithTimeout never blocks permanently on the send, even when
-// the caller's srcCtx fires before the inner goroutine completes. This tests
-// the "done MUST be buffered (cap >= 1)" invariant documented on the function.
+// runPipelineSourceWithTimeout never leaks the inner goroutine, even when the
+// caller's srcCtx fires before the inner goroutine completes. This tests the
+// "done MUST be buffered (cap >= 1)" invariant documented on the function.
+//
+// Mechanism: we call runPipelineSourceWithTimeout N times with a source whose
+// sleep outlives srcCtx. After each call we immediately drain ch (freeing the
+// outer send slot). With a BUFFERED done chan the inner goroutine can drain
+// its result into done and exit. With an UNBUFFERED done chan the inner
+// goroutine is permanently blocked on "done <- fnResult{...}" because nobody
+// receives from done after runPipelineSourceWithTimeout returns on the
+// srcCtx.Done branch.
+//
+// After waiting for the sources to finish sleeping we assert that the goroutine
+// count returned to baseline. A single leaked goroutine might hide inside ±1
+// scheduler noise, but N=5 leaks cannot: they raise the count by 5, which is
+// well above any jitter threshold.
+//
+// Falsification: change done := make(chan fnResult, 1) to make(chan fnResult)
+// in runPipelineSourceWithTimeout; the NumGoroutine assertion goes RED with a
+// count delta of N.
 func TestRunPipelineSourceWithTimeout_BufferedChannelInvariant(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-	defer cancel()
+	const N = 5
+	srcDelay := 200 * time.Millisecond
+	ctxTimeout := 50 * time.Millisecond
 
-	slow := &slowSource{
-		name:    "slow",
-		delay:   200 * time.Millisecond, // outlives srcCtx
-		res:     []sources.Result{{Title: "late"}},
+	// Sample goroutine baseline BEFORE any calls.
+	runtime.GC()
+	baseline := runtime.NumGoroutine()
+
+	ch := make(chan pipelineSourceResult, N)
+
+	// Launch N calls concurrently. Each ctx fires at ~50ms; each source sleeps
+	// 200ms, so each inner goroutine is still alive when the outer call returns.
+	for i := range N {
+		ctx, cancel := context.WithTimeout(context.Background(), ctxTimeout)
+		defer cancel()
+		slow := &slowSource{
+			name:  "slow",
+			delay: srcDelay,
+			res:   []sources.Result{{Title: "late"}},
+		}
+		start := time.Now()
+		runPipelineSourceWithTimeout(ctx, slow, "q", ch)
+		elapsed := time.Since(start)
+		if elapsed > 200*time.Millisecond {
+			t.Errorf("call %d: runPipelineSourceWithTimeout blocked %v, want <= 200ms", i, elapsed)
+		}
+		// Drain ch to prevent the outer pipelineSourceResult send from blocking
+		// (ch is buffered N, so we're fine not draining immediately, but drain
+		// anyway to keep the goroutine count signal clean).
+		r := <-ch
+		if r.err == nil {
+			t.Errorf("call %d: expected context error, got nil", i)
+		}
 	}
 
-	ch := make(chan pipelineSourceResult, 1)
+	// Wait for inner goroutines to either:
+	//   - drain into the buffered done chan and exit (buffered case — correct)
+	//   - block permanently on unbuffered done (unbuffered case — leak)
+	// srcDelay=200ms, ctxTimeout=50ms → inner goroutines need up to ~150ms more
+	// after the outer call returns. Add 100ms CI jitter budget.
+	time.Sleep(srcDelay + 100*time.Millisecond)
 
-	start := time.Now()
-	runPipelineSourceWithTimeout(ctx, slow, "q", ch)
-	elapsed := time.Since(start)
-
-	// The function must return promptly once ctx fires (not block on the inner fn).
-	if elapsed > 200*time.Millisecond {
-		t.Errorf("runPipelineSourceWithTimeout blocked for %v, should have returned at ~50ms ctx deadline", elapsed)
-	}
-
-	r := <-ch
-	if r.err == nil {
-		t.Error("expected context error, got nil")
+	after := runtime.NumGoroutine()
+	// Each leaked inner goroutine adds 1 to the count. N=5 leaks → delta=5,
+	// which cannot be masked by ±1 scheduler noise.
+	if after > baseline+1 {
+		t.Errorf("goroutine leak: baseline=%d after=%d (delta=%d) — %d inner goroutines are likely permanently blocked on an unbuffered done channel",
+			baseline, after, after-baseline, after-baseline)
 	}
 }

@@ -99,6 +99,25 @@ func (p *Pipeline) searchSources(ctx context.Context, query string) []sources.Re
 	return collectPipelineResults(ch, p.metrics, earlyAt, allDoneCancel)
 }
 
+// metricPipelineSourceResult is the per-source fan-out outcome counter for the
+// pipeline path. Encoded as name{source=<label>,outcome=ok|fail} so the
+// go-kit/metrics Prometheus bridge surfaces it as
+// go_search_source_result_total{source="yep",outcome="fail"}.
+//
+// Uses the same metric name as search/direct.go recordSourceResult so that
+// both the pipeline fan-out and the direct fan-out share a single alertable
+// counter. A source failing 100% is invisible if a sibling silently covers it;
+// this counter makes that failure rate alertable.
+const metricPipelineSourceResult = "go_search_source_result_total"
+
+// recordPipelineSourceResult increments the per-source outcome counter. Nil-safe.
+func recordPipelineSourceResult(m *metrics.Registry, source, outcome string) {
+	if m == nil {
+		return
+	}
+	m.Incr(kitmetrics.Label(metricPipelineSourceResult, "source", source, "outcome", outcome))
+}
+
 // collectPipelineResults drains ch, emitting metrics and triggering early-return
 // cancellation once earlyAt results are collected.
 func collectPipelineResults(ch <-chan pipelineSourceResult, m *metrics.Registry, earlyAt int, cancel context.CancelFunc) []sources.Result {
@@ -112,12 +131,14 @@ func collectPipelineResults(ch <-chan pipelineSourceResult, m *metrics.Registry,
 			)
 		}
 		if r.err != nil {
-			slog.WarnContext(context.Background(), "source search failed",
-				"source", r.name,
-				"err", r.err,
+			recordPipelineSourceResult(m, r.name, "fail")
+			slog.Warn("source search failed",
+				slog.String("source", r.name),
+				slog.Any("err", r.err),
 			)
 			continue
 		}
+		recordPipelineSourceResult(m, r.name, "ok")
 		slog.Info("pipeline source results", slog.String("source", r.name), slog.Int("count", len(r.results)))
 		all = append(all, r.results...)
 		if !cancelled && len(all) >= earlyAt {
