@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"sync"
+	"time"
 
 	"golang.org/x/time/rate"
 
@@ -43,6 +44,55 @@ type DirectConfig struct {
 	BraveLimiter     *rate.Limiter
 	RedditLimiter    *rate.Limiter
 	BingLimiter      *rate.Limiter
+
+	// PerSourceTimeout caps each source goroutine (retries included).
+	// Default 6s when zero.
+	PerSourceTimeout time.Duration
+
+	// EarlyReturnAt returns as soon as this many results are collected
+	// across all sources. 0 = 10 default.
+	EarlyReturnAt int
+}
+
+// directResult holds the outcome of one source goroutine.
+type directResult struct {
+	label   string
+	results []sources.Result
+	err     error
+	dur     time.Duration
+}
+
+// directJob describes one enabled scraper in the fan-out.
+type directJob struct {
+	enabled bool
+	label   string
+	fn      func(context.Context) ([]sources.Result, error)
+}
+
+// runSourceWithTimeout executes fn inside a goroutine that is capped by srcCtx.
+// It sends the result to ch once fn completes or srcCtx is cancelled (whichever
+// comes first), so a blocked BrowserDoer.Do call cannot exceed the timeout.
+func runSourceWithTimeout(srcCtx context.Context, label string, fn func(context.Context) ([]sources.Result, error), ch chan<- directResult) {
+	start := time.Now()
+	type fnResult struct {
+		res []sources.Result
+		err error
+	}
+	done := make(chan fnResult, 1)
+	go func() {
+		res, err := fn(srcCtx)
+		done <- fnResult{res, err}
+	}()
+
+	var res []sources.Result
+	var err error
+	select {
+	case r := <-done:
+		res, err = r.res, r.err
+	case <-srcCtx.Done():
+		err = srcCtx.Err()
+	}
+	ch <- directResult{label: label, results: res, err: err, dur: time.Since(start)}
 }
 
 // metricSourceResult is the per-source fan-out outcome counter. Encoded as
@@ -85,59 +135,100 @@ func SearchDirect(ctx context.Context, cfg DirectConfig, query, language string)
 
 	cfg.Browser = newDualBrowser(cfg.Browser, cfg.FallbackBrowser)
 
-	var wg sync.WaitGroup
-	var mu sync.Mutex
-	var all []sources.Result
-
-	collect := func(results []sources.Result, err error, label string) {
-		if err != nil {
-			recordSourceResult(cfg.Metrics, label, "fail")
-			slog.Warn("search source failed", slog.String("source", label), slog.Any("error", err))
-			return
-		}
-		recordSourceResult(cfg.Metrics, label, "ok")
-		slog.Info("search source results", slog.String("source", label), slog.Int("count", len(results)))
-		mu.Lock()
-		all = append(all, results...)
-		mu.Unlock()
+	perSrc := cfg.PerSourceTimeout
+	if perSrc == 0 {
+		perSrc = 6 * time.Second
+	}
+	earlyAt := cfg.EarlyReturnAt
+	if earlyAt == 0 {
+		earlyAt = 10
 	}
 
-	type job struct {
-		enabled bool
-		label   string
-		fn      func() ([]sources.Result, error)
-	}
+	// allDoneCtx is cancelled when enough results accumulate (early-return path).
+	allDoneCtx, allDoneCancel := context.WithCancel(ctx)
+	defer allDoneCancel()
 
-	jobs := []job{
-		{cfg.DDG, "ddg", func() ([]sources.Result, error) { return runDDG(ctx, cfg, query) }},
-		{cfg.Startpage, "startpage", func() ([]sources.Result, error) { return runStartpage(ctx, cfg, query, language) }},
-		{cfg.Brave, "brave", func() ([]sources.Result, error) { return runBrave(ctx, cfg, query) }},
-		{cfg.Reddit, "reddit", func() ([]sources.Result, error) { return runReddit(ctx, cfg, query) }},
-		{cfg.Bing, "bing", func() ([]sources.Result, error) { return runBing(ctx, cfg, query) }},
-		{cfg.Yep, "yep", func() ([]sources.Result, error) {
+	jobs := []directJob{
+		{cfg.DDG, "ddg", func(ctx context.Context) ([]sources.Result, error) { return runDDG(ctx, cfg, query) }},
+		{cfg.Startpage, "startpage", func(ctx context.Context) ([]sources.Result, error) {
+			return runStartpage(ctx, cfg, query, language)
+		}},
+		{cfg.Brave, "brave", func(ctx context.Context) ([]sources.Result, error) { return runBrave(ctx, cfg, query) }},
+		{cfg.Reddit, "reddit", func(ctx context.Context) ([]sources.Result, error) { return runReddit(ctx, cfg, query) }},
+		{cfg.Bing, "bing", func(ctx context.Context) ([]sources.Result, error) { return runBing(ctx, cfg, query) }},
+		{cfg.Yep, "yep", func(ctx context.Context) ([]sources.Result, error) {
 			y := websearch.NewYep(websearch.WithYepBrowser(cfg.Browser))
 			return y.Search(ctx, query, websearch.SearchOpts{})
 		}},
-		{cfg.Yandex.APIKey != "", "yandex", func() ([]sources.Result, error) {
+		{cfg.Yandex.APIKey != "", "yandex", func(ctx context.Context) ([]sources.Result, error) {
 			return SearchYandexAPI(ctx, cfg.Yandex, query, "", cfg.Metrics)
 		}},
-		{cfg.Wikipedia, "wikipedia", func() ([]sources.Result, error) { return runWikipedia(ctx, cfg, query, language) }},
-		{cfg.Marginalia, "marginalia", func() ([]sources.Result, error) { return runMarginalia(ctx, cfg, query) }},
-		{cfg.Mojeek, "mojeek", func() ([]sources.Result, error) { return runMojeek(ctx, cfg, query) }},
+		{cfg.Wikipedia, "wikipedia", func(ctx context.Context) ([]sources.Result, error) {
+			return runWikipedia(ctx, cfg, query, language)
+		}},
+		{cfg.Marginalia, "marginalia", func(ctx context.Context) ([]sources.Result, error) {
+			return runMarginalia(ctx, cfg, query)
+		}},
+		{cfg.Mojeek, "mojeek", func(ctx context.Context) ([]sources.Result, error) {
+			return runMojeek(ctx, cfg, query)
+		}},
 	}
 
+	enabled := 0
+	for _, j := range jobs {
+		if j.enabled {
+			enabled++
+		}
+	}
+	if enabled == 0 {
+		return nil
+	}
+
+	ch := make(chan directResult, enabled)
+	var wg sync.WaitGroup
 	for _, j := range jobs {
 		if !j.enabled {
 			continue
 		}
 		wg.Add(1)
-		go func(label string, fn func() ([]sources.Result, error)) {
+		go func(label string, fn func(context.Context) ([]sources.Result, error)) {
 			defer wg.Done()
-			results, err := fn()
-			collect(results, err, label)
+			srcCtx, srcCancel := context.WithTimeout(allDoneCtx, perSrc)
+			defer srcCancel()
+			runSourceWithTimeout(srcCtx, label, fn, ch)
 		}(j.label, j.fn)
 	}
 
-	wg.Wait()
+	go func() {
+		wg.Wait()
+		close(ch)
+	}()
+
+	return collectResults(ch, cfg.Metrics, earlyAt, allDoneCancel)
+}
+
+// collectResults drains ch and accumulates results, emitting metrics and triggering
+// early-return cancellation once earlyAt results are collected.
+func collectResults(ch <-chan directResult, m *metrics.Registry, earlyAt int, cancel context.CancelFunc) []sources.Result {
+	var all []sources.Result
+	for r := range ch {
+		if m != nil {
+			m.ObserveSeconds(
+				kitmetrics.Label("go_search_search_source_duration_seconds", "source", r.label),
+				r.dur,
+			)
+		}
+		if r.err != nil {
+			recordSourceResult(m, r.label, "fail")
+			slog.Warn("search source failed", slog.String("source", r.label), slog.Any("error", r.err))
+			continue
+		}
+		recordSourceResult(m, r.label, "ok")
+		slog.Info("search source results", slog.String("source", r.label), slog.Int("count", len(r.results)))
+		all = append(all, r.results...)
+		if len(all) >= earlyAt {
+			cancel()
+		}
+	}
 	return all
 }
