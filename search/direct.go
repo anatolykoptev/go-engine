@@ -57,10 +57,11 @@ type DirectConfig struct {
 	// Default defaultPerSourceTimeout (6s) when zero.
 	PerSourceTimeout time.Duration
 
-	// EarlyReturnAt returns as soon as this many results are collected
-	// across all sources. Trades completeness for lower tail latency: a
-	// caller wanting maximum result coverage should set this high and rely
-	// on PerSourceTimeout to bound the overall wall-clock time instead.
+	// EarlyReturnAt is a soft cap: cancels in-flight sources once N results
+	// are collected across all sources; already-delivered results are kept,
+	// so the final count may exceed N. Trades completeness for lower tail
+	// latency: a caller wanting maximum result coverage should set this high
+	// and rely on PerSourceTimeout to bound the overall wall-clock time instead.
 	// Default defaultEarlyReturnAt (10) when zero.
 	EarlyReturnAt int
 }
