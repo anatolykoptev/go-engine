@@ -33,8 +33,16 @@ type BrowserDoer interface {
 
 // DirectConfig controls the SearchDirect fan-out behavior.
 type DirectConfig struct {
-	Browser          BrowserDoer
-	FallbackBrowser  BrowserDoer // optional: used when Browser fails on proxy-quota/gateway statuses (402/407/5xx)
+	Browser         BrowserDoer
+	FallbackBrowser BrowserDoer // optional: used when Browser fails on proxy-quota/gateway statuses (402/407/5xx)
+	// MojeekBrowser, when non-nil, is the doer used exclusively for Mojeek
+	// (set it to a residential-proxy-backed BrowserClient). Mojeek blocks our
+	// datacenter egress IP at the network level (lighttpd 403 "automated
+	// queries", served before TLS/headers), so the shared direct-primary
+	// Browser is permanently blocked for it; the dualBrowser fallback only
+	// escalates on 402/407/5xx, not the 403 Mojeek returns. When nil, runMojeek
+	// falls back to Browser (default, backward-compatible).
+	MojeekBrowser    BrowserDoer
 	DDG              bool
 	Startpage        bool
 	Brave            bool
