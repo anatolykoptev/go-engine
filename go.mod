@@ -5,7 +5,7 @@ go 1.26
 require (
 	github.com/JohannesKaufmann/html-to-markdown/v2 v2.5.0
 	github.com/PuerkitoBio/goquery v1.11.0
-	github.com/anatolykoptev/go-kit v0.85.0
+	github.com/anatolykoptev/go-kit v0.90.0
 	github.com/anatolykoptev/go-stealth v1.15.0
 	github.com/markusmobius/go-trafilatura v1.12.2
 	github.com/prometheus/client_golang v1.23.2
