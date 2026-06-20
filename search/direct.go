@@ -115,12 +115,20 @@ func runSourceWithTimeout(srcCtx context.Context, label string, fn func(context.
 }
 
 // metricSourceResult is the per-source fan-out outcome counter. Encoded as
-// name{source=<label>,outcome=ok|fail} so the go-kit/metrics Prometheus bridge
+// name{source=<label>,outcome=ok|empty|fail} so the go-kit/metrics Prometheus bridge
 // surfaces it as go_search_source_result_total{source="yep",outcome="fail"}.
+//
+// Outcomes:
+//   - ok    — source returned ≥1 result
+//   - empty — source returned HTTP 200 with zero results (silent-block signature:
+//             e.g. mojeek 403 masquerading as empty, geo-blocked source)
+//   - fail  — source returned an error
 //
 // Rationale: a source failing 100% (e.g. yep on the deprecated endpoint) was
 // invisible because a sibling source (yandex) silently covered the result set.
-// This counter makes a per-source failure rate alertable.
+// This counter makes a per-source failure rate alertable. The "empty" outcome
+// additionally surfaces silent blocks where the source appears healthy (no error)
+// but consistently returns zero usable results.
 const metricSourceResult = "go_search_source_result_total"
 
 // recordSourceResult increments the per-source outcome counter. Nil-safe.
@@ -241,6 +249,11 @@ func collectResults(ch <-chan directResult, m *metrics.Registry, earlyAt int, ca
 		if r.err != nil {
 			recordSourceResult(m, r.label, "fail")
 			slog.Warn("search source failed", slog.String("source", r.label), slog.Any("error", r.err))
+			continue
+		}
+		if len(r.results) == 0 {
+			recordSourceResult(m, r.label, "empty")
+			slog.Info("search source empty", slog.String("source", r.label))
 			continue
 		}
 		recordSourceResult(m, r.label, "ok")
