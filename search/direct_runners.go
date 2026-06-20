@@ -90,6 +90,20 @@ func runMarginalia(ctx context.Context, cfg DirectConfig, query string) ([]sourc
 }
 
 // runMojeek fetches Mojeek search results via HTML scraping.
+//
+// Mojeek is routed through cfg.MojeekBrowser when set (a residential-proxy
+// BrowserClient) because its anti-bot gate blocks datacenter egress IPs at the
+// network level. When MojeekBrowser is nil it falls back to the shared
+// cfg.Browser (direct-primary dualBrowser), preserving prior behaviour.
 func runMojeek(ctx context.Context, cfg DirectConfig, query string) ([]sources.Result, error) {
-	return SearchMojeekDirect(ctx, cfg.Browser, query, cfg.Metrics)
+	browser := cfg.Browser
+	// isNilInterface (not a plain != nil) guards the typed-nil pitfall: an
+	// interface holding a typed-nil *stealth.BrowserClient passes `!= nil` and
+	// then panics in Do (the 2026-05-16 go-search prod panic class). Mojeek is
+	// the one source that bypasses the dualBrowser funnel where isNilInterface
+	// already applies, so the guard must live here too.
+	if !isNilInterface(cfg.MojeekBrowser) {
+		browser = cfg.MojeekBrowser
+	}
+	return SearchMojeekDirect(ctx, browser, query, cfg.Metrics)
 }
