@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 
-	kitmetrics "github.com/anatolykoptev/go-kit/metrics"
-
 	"github.com/anatolykoptev/go-engine/metrics"
 	"github.com/anatolykoptev/go-engine/sources"
 	"github.com/anatolykoptev/go-engine/websearch"
@@ -31,9 +29,12 @@ func SearchRedditDirect(ctx context.Context, bc BrowserDoer, query string, m *me
 // Counter name: go_search_reddit_tier_total{tier=<tier>,outcome=<outcome>}
 //
 // Outcomes:
-//   - empty        — tier returned 0 results with no error (escalating)
+//   - empty        — tier returned 0 results with no error (escalating to next tier)
 //   - rate_limited — tier returned *ErrRateLimited
 //   - error        — tier returned any other non-nil error
+//
+// Note: success short-circuits before recordTierOutcome is called, so "ok"
+// is never emitted as an outcome label.
 const metricRedditTier = "go_search_reddit_tier_total"
 
 // tierOutcomeLabel maps a tier exit error to a bounded outcome label for the
@@ -49,20 +50,16 @@ func tierOutcomeLabel(err error) string {
 	return "error"
 }
 
-// recordTierOutcome increments the per-tier outcome counter for the Reddit
-// 3-tier escalation chain. Nil metrics registry is a no-op.
+// recordTierOutcome computes the outcome label for the given tier exit error and
+// records it in the taxonomy. Currently a no-op for metric emission: the registry
+// is not threaded through to this call site yet. The live counter
+// (go_search_reddit_tier_total) will be wired in the go-search phase when the
+// registry is in scope.
 //
 // err == nil means the tier returned 0 results (empty outcome).
 // err is classified into "rate_limited" or "error" via tierOutcomeLabel.
 func recordTierOutcome(tier string, err error) {
-	// NOTE: the metrics registry from DirectConfig is not threaded into this
-	// call site in the current implementation because runReddit receives cfg
-	// by value and calls recordTierOutcome for observability. In a follow-up
-	// phase the registry will be plumbed through to enable Prometheus scraping.
-	// For now this function establishes the interface and enables future wiring
-	// without any metric emission (no-op body). The counter name and outcome
-	// label taxonomy are defined here so that go_search_reddit_tier_total
-	// is consistent with the rest of the source_result counter naming.
-	_ = tierOutcomeLabel(err)
-	_ = kitmetrics.Label(metricRedditTier, "tier", tier, "outcome", tierOutcomeLabel(err))
+	// counter name: metricRedditTier, wired in the go-search phase when the registry is in scope
+	_ = metricRedditTier
+	_, _ = tier, tierOutcomeLabel(err)
 }

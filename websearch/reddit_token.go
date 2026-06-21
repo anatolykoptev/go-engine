@@ -119,6 +119,9 @@ func (m *redditTokenManager) fetchToken(ctx context.Context, doer BrowserDoer) (
 	if status == http.StatusUnauthorized {
 		return "", time.Time{}, ErrCredentialInvalid
 	}
+	if status >= 500 {
+		return "", time.Time{}, fmt.Errorf("reddit token: status %d: %w", status, ErrTransient)
+	}
 	if status != http.StatusOK {
 		return "", time.Time{}, fmt.Errorf("reddit token endpoint returned status %d", status)
 	}

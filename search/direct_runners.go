@@ -72,6 +72,9 @@ func isEscalatable(err error) bool {
 	if errors.Is(err, websearch.ErrCredentialInvalid) {
 		return false
 	}
+	if errors.Is(err, websearch.ErrTransient) {
+		return true
+	}
 	var rl *ErrRateLimited
 	return errors.As(err, &rl)
 }
@@ -93,6 +96,7 @@ func callTier1OAuth(ctx context.Context, cfg DirectConfig, query string) tierCal
 		if len(res) > 0 {
 			return tierCallResult{res: res, done: true}
 		}
+		// empty primary result escalates — a soft-block/degraded primary should let lower tiers try
 		recordTierOutcome("oauth", nil)
 		return tierCallResult{}
 	}
