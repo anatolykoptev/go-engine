@@ -12,9 +12,9 @@ var reHTMLTag = regexp.MustCompile(`<[^>]*>`)
 
 // Common Accept / Content-Type header values reused across search providers.
 const (
-	acceptJSON             = "application/json"
-	acceptHTML             = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
-	acceptFormURLEncoded   = "application/x-www-form-urlencoded"
+	acceptJSON           = "application/json"
+	acceptHTML           = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+	acceptFormURLEncoded = "application/x-www-form-urlencoded"
 )
 
 // CleanHTML strips HTML tags and trims whitespace.

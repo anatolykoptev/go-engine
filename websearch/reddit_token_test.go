@@ -14,8 +14,8 @@ import (
 
 // fakeTokenDoer is a BrowserDoer that returns canned responses for token endpoint calls.
 type fakeTokenDoer struct {
-	calls   atomic.Int64
-	fn      func(method, url string, headers map[string]string, body io.Reader) ([]byte, map[string]string, int, error)
+	calls atomic.Int64
+	fn    func(method, url string, headers map[string]string, body io.Reader) ([]byte, map[string]string, int, error)
 }
 
 func (f *fakeTokenDoer) Do(method, url string, headers map[string]string, body io.Reader) ([]byte, map[string]string, int, error) {
@@ -164,5 +164,130 @@ func TestTokenManager_401_OnPost(t *testing.T) {
 	}
 	if secondCallCount.Load() != 1 {
 		t.Error("expected doer2 to be called once (nothing cached from 401)")
+	}
+}
+
+// TestTokenManager_EmptyAccessToken verifies that a 200 response with an empty
+// access_token returns an error, and nothing is cached (so a subsequent call
+// hits a fresh doer).
+// Mutation gate: remove the `resp.AccessToken == ""` guard in fetchToken →
+// empty token gets cached → second call hits doer1 again (not doer2) →
+// tok != "fresh-tok" → test fails.
+func TestTokenManager_EmptyAccessToken(t *testing.T) {
+	creds := RedditCredentials{
+		ClientID:     "test-id",
+		ClientSecret: "test-secret",
+		UserAgent:    "test-agent/1.0",
+	}
+
+	doer1 := &fakeTokenDoer{fn: func(_, _ string, _ map[string]string, _ io.Reader) ([]byte, map[string]string, int, error) {
+		return []byte(`{"access_token":"","token_type":"bearer","expires_in":3600}`), nil, http.StatusOK, nil
+	}}
+
+	tm := NewRedditTokenManager(creds, nil)
+
+	_, err := tm.Token(context.Background(), doer1)
+	if err == nil {
+		t.Fatal("expected error for empty access_token, got nil")
+	}
+
+	// Verify nothing was cached: a second call must use doer2 (fresh doer), not doer1.
+	doer2 := &fakeTokenDoer{fn: func(_, _ string, _ map[string]string, _ io.Reader) ([]byte, map[string]string, int, error) {
+		return tokenJSON("fresh-tok", 3600), nil, http.StatusOK, nil
+	}}
+
+	tok, err2 := tm.Token(context.Background(), doer2)
+	if err2 != nil {
+		t.Fatalf("retry Token: %v", err2)
+	}
+	if tok != "fresh-tok" {
+		t.Errorf("retry Token = %q, want fresh-tok (previous empty-token error must not be cached)", tok)
+	}
+	if doer2.calls.Load() != 1 {
+		t.Errorf("doer2 called %d times, want 1 (nothing should be cached from empty-token error)", doer2.calls.Load())
+	}
+}
+
+// TestTokenManager_MalformedJSON verifies that a 200 response with malformed
+// JSON returns a decode error, and nothing is cached.
+// Mutation gate: remove json.Unmarshal call (or bypass error check) → parse
+// succeeds silently → no error returned → test fails.
+func TestTokenManager_MalformedJSON(t *testing.T) {
+	creds := RedditCredentials{
+		ClientID:     "test-id",
+		ClientSecret: "test-secret",
+		UserAgent:    "test-agent/1.0",
+	}
+
+	doer1 := &fakeTokenDoer{fn: func(_, _ string, _ map[string]string, _ io.Reader) ([]byte, map[string]string, int, error) {
+		return []byte("not json at all"), nil, http.StatusOK, nil
+	}}
+
+	tm := NewRedditTokenManager(creds, nil)
+
+	_, err := tm.Token(context.Background(), doer1)
+	if err == nil {
+		t.Fatal("expected decode error for malformed JSON, got nil")
+	}
+
+	// Verify nothing was cached: a second call must use doer2.
+	doer2 := &fakeTokenDoer{fn: func(_, _ string, _ map[string]string, _ io.Reader) ([]byte, map[string]string, int, error) {
+		return tokenJSON("fresh-tok", 3600), nil, http.StatusOK, nil
+	}}
+
+	tok, err2 := tm.Token(context.Background(), doer2)
+	if err2 != nil {
+		t.Fatalf("retry Token: %v", err2)
+	}
+	if tok != "fresh-tok" {
+		t.Errorf("retry Token = %q, want fresh-tok (error path must not cache)", tok)
+	}
+	if doer2.calls.Load() != 1 {
+		t.Errorf("doer2 called %d times, want 1 (nothing cached from malformed-JSON error)", doer2.calls.Load())
+	}
+}
+
+// TestTokenManager_RefreshMarginFloor verifies that when expires_in is very small
+// (< 1s+refreshMargin), the cache window is floored to 1s so the token is
+// cached for at least 1s and an immediate re-call hits the cache.
+// Mutation gate: remove `if window < time.Second { window = time.Second }` →
+// window = 5s-60s = negative → expiry = now.Add(negative) → now().Before(expiry)
+// is immediately false → second call goes back to doer → doer.calls==2 →
+// test fails.
+func TestTokenManager_RefreshMarginFloor(t *testing.T) {
+	fixedNow := time.Now()
+	now := func() time.Time { return fixedNow }
+
+	creds := RedditCredentials{
+		ClientID:     "test-id",
+		ClientSecret: "test-secret",
+		UserAgent:    "test-agent/1.0",
+	}
+
+	doer := &fakeTokenDoer{fn: func(_, _ string, _ map[string]string, _ io.Reader) ([]byte, map[string]string, int, error) {
+		return tokenJSON("tok", 5), nil, http.StatusOK, nil
+	}}
+
+	tm := NewRedditTokenManager(creds, now)
+
+	tok1, err := tm.Token(context.Background(), doer)
+	if err != nil {
+		t.Fatalf("first Token: %v", err)
+	}
+	if tok1 != "tok" {
+		t.Fatalf("first Token = %q, want tok", tok1)
+	}
+
+	// Same fixed clock — expiry should still be in the future (floored to 1s).
+	tok2, err := tm.Token(context.Background(), doer)
+	if err != nil {
+		t.Fatalf("second Token: %v", err)
+	}
+	if tok2 != "tok" {
+		t.Fatalf("second Token = %q, want tok", tok2)
+	}
+
+	if n := doer.calls.Load(); n != 1 {
+		t.Errorf("doer called %d times, want 1 (floor=1s should keep token in cache)", n)
 	}
 }

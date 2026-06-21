@@ -13,8 +13,8 @@ import (
 )
 
 const (
-	redditEndpoint  = "https://www.reddit.com/search.json"
-	redditBaseURL   = "https://www.reddit.com"
+	redditEndpoint    = "https://www.reddit.com/search.json"
+	redditBaseURL     = "https://www.reddit.com"
 	redditMaxSelftext = 300
 )
 
@@ -164,7 +164,7 @@ func SearchOAuth(ctx context.Context, doer BrowserDoer, tm RedditTokenManager, q
 		return nil, fmt.Errorf("reddit oauth: token: %w", err)
 	}
 
-	u := redditOAuthBase + "/search?q=" + urlQueryEscape(query) +
+	u := redditOAuthBase + "/search?q=" + url.QueryEscape(query) +
 		"&type=link&raw_json=1&limit=10&sort=relevance&t=all"
 
 	headers := map[string]string{
@@ -181,7 +181,7 @@ func SearchOAuth(ctx context.Context, doer BrowserDoer, tm RedditTokenManager, q
 	// Handle rate limiting: check both HTTP status and JSON body.
 	if isRateLimitStatus(status) || isRedditRateLimited(data) {
 		rl := &ErrRateLimited{Engine: "reddit-oauth"}
-		if retryAfter, ok := respHeaders["Retry-After"]; ok && retryAfter != "" {
+		if retryAfter, ok := respHeaders["retry-after"]; ok && retryAfter != "" {
 			// best-effort parse; ignore if malformed
 			if d, parseErr := time.ParseDuration(retryAfter + "s"); parseErr == nil {
 				rl.RetryAfter = d
@@ -206,25 +206,4 @@ func SearchOAuth(ctx context.Context, doer BrowserDoer, tm RedditTokenManager, q
 	}
 
 	return applyLimit(results, 0), nil
-}
-
-// urlQueryEscape percent-encodes the query for inclusion in a URL.
-func urlQueryEscape(s string) string {
-	var b strings.Builder
-	for _, r := range s {
-		switch {
-		case r >= 'A' && r <= 'Z',
-			r >= 'a' && r <= 'z',
-			r >= '0' && r <= '9',
-			r == '-' || r == '_' || r == '.' || r == '~':
-			b.WriteRune(r)
-		case r == ' ':
-			b.WriteByte('+')
-		default:
-			for _, byt := range []byte(string(r)) {
-				fmt.Fprintf(&b, "%%%02X", byt)
-			}
-		}
-	}
-	return b.String()
 }

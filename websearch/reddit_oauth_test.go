@@ -6,13 +6,14 @@ import (
 	"io"
 	"net/http"
 	"testing"
+	"time"
 )
 
 // spyTokenManager is a RedditTokenManager that records Invalidate calls.
 type spyTokenManager struct {
-	token          string
-	tokenErr       error
-	invalidated    bool
+	token           string
+	tokenErr        error
+	invalidated     bool
 	invalidateCount int
 }
 
@@ -163,5 +164,32 @@ func TestSearchOAuth_TokenError(t *testing.T) {
 	}
 	if !errors.Is(err, tokenErr) {
 		t.Errorf("expected tokenErr in chain, got %v", err)
+	}
+}
+
+// TestSearchOAuth_429_WithRetryAfter verifies that a 429 response with a lowercase
+// "retry-after" header (as returned by go-stealth BrowserDoer backends which
+// canonicalise all header keys to lowercase) sets rl.RetryAfter = 120s.
+// Mutation gate: change respHeaders["retry-after"] back to respHeaders["Retry-After"]
+// in reddit.go → ok not true → rl.RetryAfter stays 0 → test fails.
+func TestSearchOAuth_429_WithRetryAfter(t *testing.T) {
+	tm := &spyTokenManager{token: "bearer-tok"}
+
+	doer := &mockBrowser{fn: func(_, _ string, _ map[string]string, _ io.Reader) ([]byte, map[string]string, int, error) {
+		return []byte("rate limited"), map[string]string{"retry-after": "120"}, http.StatusTooManyRequests, nil
+	}}
+
+	_, err := SearchOAuth(context.Background(), doer, tm, "golang", "test-agent/1.0")
+	if err == nil {
+		t.Fatal("expected error on 429, got nil")
+	}
+
+	var rl *ErrRateLimited
+	if !errors.As(err, &rl) {
+		t.Fatalf("expected *ErrRateLimited, got %T: %v", err, err)
+	}
+	const want = 120 * time.Second
+	if rl.RetryAfter != want {
+		t.Errorf("RetryAfter = %v, want %v (lowercase header not read)", rl.RetryAfter, want)
 	}
 }

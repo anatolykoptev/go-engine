@@ -58,6 +58,7 @@ func NewRedditTokenManager(creds RedditCredentials, now func() time.Time) Reddit
 // Token returns a valid bearer token. If the cached token is still within its validity
 // window, it is returned immediately. Otherwise a new token is fetched via doer.
 // The mutex is held across the refresh to provide single-flight semantics.
+// NOTE: the mutex is held across the doer.Do call; callers serialize behind a refresh and ctx cannot cancel mid-fetch.
 func (m *redditTokenManager) Token(ctx context.Context, doer BrowserDoer) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
