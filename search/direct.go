@@ -61,6 +61,22 @@ type DirectConfig struct {
 	RedditLimiter    *rate.Limiter
 	BingLimiter      *rate.Limiter
 
+	// RedditTokenManager, when non-nil, enables Tier 1 OAuth search (Phase 2).
+	// Zero value (nil) → inactive; legacy SearchRedditDirect path used.
+	RedditTokenManager websearch.RedditTokenManager
+
+	// RedditUserAgent is sent as the User-Agent in Reddit OAuth requests.
+	// Only used when RedditTokenManager is non-nil.
+	RedditUserAgent string
+
+	// RedditCookieSearch, when non-nil, enables Tier 2 cookie-based search.
+	// Receives (ctx, query) and returns (results, error).
+	RedditCookieSearch func(ctx context.Context, query string) ([]sources.Result, error)
+
+	// RedditBrowserRender, when non-nil, enables Tier 3 browser-render search.
+	// Receives (ctx, query) and returns (results, error).
+	RedditBrowserRender func(ctx context.Context, query string) ([]sources.Result, error)
+
 	// PerSourceTimeout caps each source goroutine (retries included).
 	// Default defaultPerSourceTimeout (6s) when zero.
 	PerSourceTimeout time.Duration
@@ -129,7 +145,7 @@ func runSourceWithTimeout(srcCtx context.Context, label string, fn func(context.
 // Outcomes:
 //   - ok    — source returned ≥1 result
 //   - empty — source returned HTTP 200 with zero results (silent-block signature:
-//             e.g. mojeek 403 masquerading as empty, geo-blocked source)
+//     e.g. mojeek 403 masquerading as empty, geo-blocked source)
 //   - fail  — source returned an error
 //
 // Rationale: a source failing 100% (e.g. yep on the deprecated endpoint) was
