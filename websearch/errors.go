@@ -1,6 +1,7 @@
 package websearch
 
 import (
+	"errors"
 	"fmt"
 	"time"
 )
@@ -17,3 +18,8 @@ func (e *ErrRateLimited) Error() string {
 	}
 	return "rate limited by " + e.Engine
 }
+
+// ErrCredentialInvalid is returned when the OAuth client credentials are rejected
+// by the token endpoint (HTTP 401 on POST /api/v1/access_token).
+// Distinct from a 401 on a GET request (which means the token expired, not bad creds).
+var ErrCredentialInvalid = errors.New("reddit: invalid client credentials")
