@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 )
 
 const (
@@ -148,4 +149,82 @@ func isRedditRateLimited(data []byte) bool {
 	}
 
 	return strings.EqualFold(errResp.Message, "Too Many Requests")
+}
+
+const (
+	redditOAuthBase = "https://oauth.reddit.com"
+)
+
+// SearchOAuth searches Reddit via the OAuth API using a bearer token from tm.
+// The OAuth endpoint (oauth.reddit.com) returns the same Listing/t3 JSON shape
+// as the public API, so ParseRedditJSON is reused unchanged.
+func SearchOAuth(ctx context.Context, doer BrowserDoer, tm RedditTokenManager, query, userAgent string) ([]Result, error) {
+	tok, err := tm.Token(ctx, doer)
+	if err != nil {
+		return nil, fmt.Errorf("reddit oauth: token: %w", err)
+	}
+
+	u := redditOAuthBase + "/search?q=" + urlQueryEscape(query) +
+		"&type=link&raw_json=1&limit=10&sort=relevance&t=all"
+
+	headers := map[string]string{
+		"Authorization": "Bearer " + tok,
+		"User-Agent":    userAgent,
+		"Accept":        acceptJSON,
+	}
+
+	data, respHeaders, status, err := doer.Do(http.MethodGet, u, headers, nil)
+	if err != nil {
+		return nil, fmt.Errorf("reddit oauth search: %w", err)
+	}
+
+	// Handle rate limiting: check both HTTP status and JSON body.
+	if isRateLimitStatus(status) || isRedditRateLimited(data) {
+		rl := &ErrRateLimited{Engine: "reddit-oauth"}
+		if retryAfter, ok := respHeaders["Retry-After"]; ok && retryAfter != "" {
+			// best-effort parse; ignore if malformed
+			if d, parseErr := time.ParseDuration(retryAfter + "s"); parseErr == nil {
+				rl.RetryAfter = d
+			}
+		}
+		return nil, rl
+	}
+
+	// 401 means the token expired; invalidate so next call refreshes.
+	if status == http.StatusUnauthorized {
+		tm.Invalidate()
+		return nil, errors.New("reddit oauth: token expired (401) — invalidated, retry")
+	}
+
+	if status != http.StatusOK {
+		return nil, fmt.Errorf("reddit oauth search: status %d", status)
+	}
+
+	results, err := ParseRedditJSON(data)
+	if err != nil {
+		return nil, fmt.Errorf("reddit oauth parse: %w", err)
+	}
+
+	return applyLimit(results, 0), nil
+}
+
+// urlQueryEscape percent-encodes the query for inclusion in a URL.
+func urlQueryEscape(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r >= 'A' && r <= 'Z',
+			r >= 'a' && r <= 'z',
+			r >= '0' && r <= '9',
+			r == '-' || r == '_' || r == '.' || r == '~':
+			b.WriteRune(r)
+		case r == ' ':
+			b.WriteByte('+')
+		default:
+			for _, byt := range []byte(string(r)) {
+				fmt.Fprintf(&b, "%%%02X", byt)
+			}
+		}
+	}
+	return b.String()
 }
