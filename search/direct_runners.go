@@ -375,6 +375,8 @@ func runOxEngine(ctx context.Context, cfg DirectConfig, query, label string) ([]
 		return runOxDDG(rctx, cfg, query)
 	case "brave":
 		return runOxBrave(rctx, cfg, query)
+	case "bing":
+		return runOxBing(rctx, cfg, query)
 	default:
 		slog.Warn("ox escalation: unsupported engine", slog.String("engine", label))
 		return nil, "fail"
@@ -415,6 +417,28 @@ func runOxBrave(ctx context.Context, cfg DirectConfig, query string) ([]sources.
 	results, err := websearch.ParseBraveHTML([]byte(html))
 	if err != nil {
 		slog.Warn("ox escalation brave: parse error", slog.Any("error", err))
+		return nil, "fail"
+	}
+	if len(results) == 0 {
+		return nil, "empty"
+	}
+	return results, "ok"
+}
+
+// runOxBing fetches and parses a Bing HTML SERP via ox-browser stealth Chromium.
+// URL built by websearch.BingSearchURL (single-owned in websearch per ADR-8).
+// Parsed by websearch.ParseBingHTML (reused from the Bing scraper path).
+// Bing is GET-fetchable (ADR-6); Startpage excluded (POST-only → SSRF risk).
+func runOxBing(ctx context.Context, cfg DirectConfig, query string) ([]sources.Result, string) {
+	u := websearch.BingSearchURL(query)
+	html, err := cfg.OxBrowserFetch(ctx, u)
+	if err != nil {
+		slog.Warn("ox escalation bing: fetch error", slog.Any("error", err))
+		return nil, "fail"
+	}
+	results, err := websearch.ParseBingHTML([]byte(html))
+	if err != nil {
+		slog.Warn("ox escalation bing: parse error", slog.Any("error", err))
 		return nil, "fail"
 	}
 	if len(results) == 0 {

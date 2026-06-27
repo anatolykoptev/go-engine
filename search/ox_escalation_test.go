@@ -30,6 +30,17 @@ const minimalBraveHTML = `<html><body>
 </div>
 </body></html>`
 
+// minimalBingHTML is a minimal Bing SERP that ParseBingHTML can parse.
+// Structure follows bing.go: #b_results > li.b_algo > h2 a + .b_caption p.
+const minimalBingHTML = `<html><body>
+<ol id="b_results">
+<li class="b_algo">
+<h2><a href="https://example.com/bing-ox">Bing Ox Result</a></h2>
+<div class="b_caption"><p class="b_lineclamp2">Result via ox-browser Bing escalation.</p></div>
+</li>
+</ol>
+</body></html>`
+
 // oxFetchFn builds a stub OxBrowserFetch closure that returns the given HTML
 // and counts how many times it is called.
 func oxFetchFn(html string, callCount *atomic.Int32) func(context.Context, string) (string, error) {
@@ -504,6 +515,69 @@ func TestRunOxBrave_ParsesMinimalHTML(t *testing.T) {
 	}
 	if len(res) == 0 {
 		t.Fatal("runOxBrave: want ≥1 result from minimal Brave HTML, got 0")
+	}
+}
+
+// TestOxEscalation_EscalatesBing asserts that when Bing is blocked in BlockCache,
+// the Bing HTML SERP is fetched via OxBrowserFetch and parsed into results.
+//
+// RED-ON-REVERT:
+//   - Remove runOxBing or its OxBrowserFetch call → fetches==0 → test fails.
+//   - Remove Bing from OxEscalate → eligible empty → results nil → test fails.
+func TestOxEscalation_EscalatesBing(t *testing.T) {
+	var fetches atomic.Int32
+	bc := fetch.NewDirectBlockCache(0, 0)
+	bc.Mark("bing") // Bing is captcha-blocked
+
+	var fetchedURL string
+	cfg := DirectConfig{
+		OxBrowserFetch: func(_ context.Context, u string) (string, error) {
+			fetches.Add(1)
+			fetchedURL = u
+			return minimalBingHTML, nil
+		},
+		OxEscalate: []string{"bing"},
+		BlockCache: bc,
+		Metrics:    metrics.New(),
+	}
+
+	got := runOxEscalation(context.Background(), cfg, "golang", 0, 10)
+
+	if n := fetches.Load(); n != 1 {
+		t.Errorf("OxBrowserFetch called %d times, want 1", n)
+	}
+	if !strings.Contains(fetchedURL, "bing.com/search") {
+		t.Errorf("fetchedURL = %q, want Bing Search endpoint", fetchedURL)
+	}
+	if len(got) == 0 {
+		t.Fatal("want ≥1 result from Bing ox escalation, got 0")
+	}
+	if got[0].URL != "https://example.com/bing-ox" {
+		t.Errorf("got[0].URL = %q, want https://example.com/bing-ox", got[0].URL)
+	}
+
+	snap := cfg.Metrics.Snapshot()
+	okKey := "go_search_ox_escalation_total{engine=bing,outcome=ok}"
+	if snap[okKey] != 1 {
+		t.Errorf("metric %s = %d, want 1 (snapshot: %v)", okKey, snap[okKey], snap)
+	}
+}
+
+// TestRunOxBing_ParsesMinimalHTML is a direct unit test of runOxBing confirming
+// that ParseBingHTML can parse the minimal Bing HTML fixture into ≥1 result.
+// Bing parse verified → allowlist extended to {DDG, Brave, Bing}.
+func TestRunOxBing_ParsesMinimalHTML(t *testing.T) {
+	cfg := DirectConfig{
+		OxBrowserFetch: func(_ context.Context, _ string) (string, error) {
+			return minimalBingHTML, nil
+		},
+	}
+	res, outcome := runOxBing(context.Background(), cfg, "golang")
+	if outcome != "ok" {
+		t.Errorf("runOxBing outcome = %q, want ok", outcome)
+	}
+	if len(res) == 0 {
+		t.Fatal("runOxBing: want ≥1 result from minimal Bing HTML, got 0")
 	}
 }
 
