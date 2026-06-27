@@ -96,6 +96,24 @@ type DirectConfig struct {
 	// existing callers), no Mark is called — byte-identical behaviour preserved.
 	// Wired by Phase 2 (P2) of the captcha-aware ox-browser escalation plan.
 	BlockCache *fetch.DirectBlockCache
+
+	// OxBrowserFetch, when non-nil, activates the post-fan-out captcha-escalation
+	// tier. It fetches the rendered SERP HTML for a given GET URL via the ox-browser
+	// stealth Chromium (/fetch endpoint). Injected by go-search (P4); nil (default)
+	// preserves the pre-P2 byte-identical path.
+	OxBrowserFetch func(ctx context.Context, url string) (string, error)
+
+	// OxEscalate is the code-defined set of engine labels eligible for ox-browser
+	// escalation when captcha-blocked. Only GET-fetchable engines with a known SERP
+	// URL builder and HTML parser are valid v1 members: {"ddg", "brave"}.
+	// Nil or empty → tier inactive.
+	OxEscalate []string
+
+	// OxConcurrency caps concurrent ox-browser fetch calls within a single
+	// SearchDirect invocation. Default 2 when zero. Admission uses TryAcquire
+	// (non-blocking select) to skip escalation rather than queue on the shared
+	// resource.
+	OxConcurrency int
 }
 
 // directResult holds the outcome of one source goroutine.
@@ -169,6 +187,18 @@ func recordSourceResult(m *metrics.Registry, source, outcome string) {
 		return
 	}
 	m.Incr(kitmetrics.Label(metricSourceResult, "source", source, "outcome", outcome))
+}
+
+// metricOxEscalation is the ox-browser captcha-escalation tier outcome counter (RED signal).
+// Encoded as go_search_ox_escalation_total{engine=<label>,outcome=ok|empty|fail|skipped}
+const metricOxEscalation = "go_search_ox_escalation_total"
+
+// recordOxEscalation increments the ox-browser escalation outcome counter. Nil-safe.
+func recordOxEscalation(m *metrics.Registry, engine, outcome string) {
+	if m == nil {
+		return
+	}
+	m.Incr(kitmetrics.Label(metricOxEscalation, "engine", engine, "outcome", outcome))
 }
 
 // SearchDirect queries enabled direct scrapers in parallel.
@@ -249,6 +279,15 @@ func SearchDirect(ctx context.Context, cfg DirectConfig, query, language string)
 		if !j.enabled {
 			continue
 		}
+		// IsBlocked short-circuit: skip the doomed direct attempt for engines already
+		// captcha-marked in BlockCache; runOxEscalation (post-fan-out) handles them.
+		// Reclaims the per-source timeout budget and naturally rate-limits Chromium
+		// re-probes via the BlockCache TTL. When BlockCache is nil (legacy path), no-op.
+		if cfg.BlockCache != nil && cfg.BlockCache.IsBlocked(j.label) {
+			slog.Debug("search direct: skipping captcha-blocked engine",
+				slog.String("source", j.label))
+			continue
+		}
 		wg.Add(1)
 		go func(label string, fn func(context.Context) ([]sources.Result, error)) {
 			defer wg.Done()
@@ -263,7 +302,13 @@ func SearchDirect(ctx context.Context, cfg DirectConfig, query, language string)
 		close(ch)
 	}()
 
-	return collectResults(ch, cfg.Metrics, earlyAt, allDoneCancel, cfg.BlockCache)
+	merged := collectResults(ch, cfg.Metrics, earlyAt, allDoneCancel, cfg.BlockCache)
+	// Post-fan-out ox-browser captcha-escalation tier.
+	// Dormant unless OxBrowserFetch, OxEscalate, and BlockCache are all set.
+	if ox := runOxEscalation(ctx, cfg, query, len(merged), earlyAt); len(ox) > 0 {
+		merged = append(merged, ox...)
+	}
+	return merged
 }
 
 // collectResults drains ch and accumulates results, emitting metrics and triggering
