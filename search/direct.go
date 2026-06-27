@@ -193,6 +193,12 @@ func recordSourceResult(m *metrics.Registry, source, outcome string) {
 // Encoded as go_search_ox_escalation_total{engine=<label>,outcome=ok|empty|fail|skipped}
 const metricOxEscalation = "go_search_ox_escalation_total"
 
+// metricOxInflight is the ox-browser escalation concurrency gauge (USE signal — semaphore depth).
+// Encoded as go_search_ox_browser_inflight; carries the go_search_ prefix to match the sibling
+// counters and stay grouped in go-search dashboards/alerts (the ox-browser /fetch server in
+// go-wowa exposes its own metrics — a bare name would alias against them under PromQL).
+const metricOxInflight = "go_search_ox_browser_inflight"
+
 // recordOxEscalation increments the ox-browser escalation outcome counter. Nil-safe.
 func recordOxEscalation(m *metrics.Registry, engine, outcome string) {
 	if m == nil {

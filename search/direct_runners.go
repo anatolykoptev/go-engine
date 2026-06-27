@@ -317,8 +317,8 @@ func runOxEscalation(ctx context.Context, cfg DirectConfig, query string, merged
 			defer wg.Done()
 			defer func() { <-sem }()
 			if cfg.Metrics != nil {
-				cfg.Metrics.Gauge("ox_browser_inflight").Inc()
-				defer cfg.Metrics.Gauge("ox_browser_inflight").Dec()
+				cfg.Metrics.Gauge(metricOxInflight).Inc()
+				defer cfg.Metrics.Gauge(metricOxInflight).Dec()
 			}
 			res, outcome := runOxEngine(ctx, cfg, query, l)
 			recordOxEscalation(cfg.Metrics, l, outcome)
