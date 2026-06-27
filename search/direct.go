@@ -27,6 +27,15 @@ const defaultPerSourceTimeout = 6 * time.Second
 // cancellation when DirectConfig.EarlyReturnAt is zero.
 const defaultEarlyReturnAt = 10
 
+// errPerSourceTimeout is the context cause injected by SearchDirect into each
+// per-source WithTimeoutCause context. It lets runSourceWithTimeout and
+// handleSourceError distinguish a genuine 6 s per-source deadline from an
+// inherited parent cancellation (which also surfaces as DeadlineExceeded when
+// the caller's ctx has a short budget). Only errPerSourceTimeout triggers
+// outcome=timeout and Mark; an inherited deadline falls to outcome=fail so a
+// short-budget caller does not pin every in-flight engine for 10 m.
+var errPerSourceTimeout = errors.New("per-source timeout")
+
 // BrowserDoer performs HTTP requests with browser-like TLS fingerprint.
 // *stealth.BrowserClient satisfies this interface.
 type BrowserDoer interface {
@@ -159,24 +168,45 @@ func runSourceWithTimeout(srcCtx context.Context, label string, fn func(context.
 	select {
 	case r := <-done:
 		res, err = r.res, r.err
+		// If fn returned context.DeadlineExceeded because it detected the
+		// per-source srcCtx deadline (common for HTTP clients that propagate
+		// ctx cancellation), reconcile to the srcCtx cause. This collapses
+		// the select race: whether done or srcCtx.Done() fires first, both
+		// branches produce the same error for handleSourceError to classify.
+		if err != nil && srcCtx.Err() != nil && errors.Is(err, context.DeadlineExceeded) {
+			err = context.Cause(srcCtx)
+		}
 	case <-srcCtx.Done():
-		err = srcCtx.Err()
+		// Use context.Cause to distinguish a genuine per-source deadline
+		// (returns errPerSourceTimeout, set by WithTimeoutCause in SearchDirect)
+		// from an inherited parent cancellation or deadline (returns
+		// context.Canceled or context.DeadlineExceeded from the parent).
+		// handleSourceError keys on errPerSourceTimeout to Mark allowlisted
+		// engines; a parent-propagated DeadlineExceeded must NOT Mark.
+		err = context.Cause(srcCtx)
 	}
 	ch <- directResult{label: label, results: res, err: err, dur: time.Since(start)}
 }
 
 // metricSourceResult is the per-source fan-out outcome counter. Encoded as
-// name{source=<label>,outcome=ok|empty|fail} so the go-kit/metrics Prometheus bridge
-// surfaces it as go_search_source_result_total{source="yep",outcome="fail"}.
+// name{source=<label>,outcome=ok|empty|captcha|timeout|blocked|fail} so the
+// go-kit/metrics Prometheus bridge surfaces it as
+// go_search_source_result_total{source="yep",outcome="fail"}.
 //
 // Outcomes:
 //   - ok      — source returned ≥1 result
 //   - empty   — source returned HTTP 200 with zero results (silent-block signature:
 //     e.g. mojeek 403 masquerading as empty, geo-blocked source)
 //   - captcha — source returned *ErrRateLimited (anti-bot block); engine marked in BlockCache
-//   - timeout — per-source context.DeadlineExceeded for an OxEscalate-allowlisted engine;
-//     engine marked in BlockCache so runOxEscalation promotes it to stealth-render tier
-//   - fail    — source returned any other error
+//   - timeout — per-source deadline fired (errPerSourceTimeout via context.Cause) for an
+//     OxEscalate-allowlisted engine; engine marked in BlockCache so runOxEscalation
+//     promotes it to the stealth-render tier. An inherited parent deadline (which
+//     surfaces as context.DeadlineExceeded, not errPerSourceTimeout) does NOT produce
+//     this outcome — it falls to fail instead.
+//   - blocked — allowlisted engine returned any other hard error (e.g. DDG d.js anti-bot
+//     JS challenge body that the JSON parser rejects); engine marked in BlockCache
+//   - fail    — source returned any other error (incl. context.Canceled early-return
+//     and context.DeadlineExceeded inherited from the parent ctx)
 //
 // Rationale: a source failing 100% (e.g. yep on the deprecated endpoint) was
 // invisible because a sibling source (yandex) silently covered the result set.
@@ -301,7 +331,7 @@ func SearchDirect(ctx context.Context, cfg DirectConfig, query, language string)
 		wg.Add(1)
 		go func(label string, fn func(context.Context) ([]sources.Result, error)) {
 			defer wg.Done()
-			srcCtx, srcCancel := context.WithTimeout(allDoneCtx, perSrc)
+			srcCtx, srcCancel := context.WithTimeoutCause(allDoneCtx, perSrc, errPerSourceTimeout)
 			defer srcCancel()
 			runSourceWithTimeout(srcCtx, label, fn, ch)
 		}(j.label, j.fn)
@@ -352,7 +382,7 @@ func handleSourceError(r directResult, m *metrics.Registry, blockCache *fetch.Di
 		if blockCache != nil {
 			blockCache.Mark(r.label)
 		}
-	case errors.Is(r.err, context.DeadlineExceeded) && slices.Contains(oxEscalate, r.label):
+	case errors.Is(r.err, errPerSourceTimeout) && slices.Contains(oxEscalate, r.label):
 		recordSourceResult(m, r.label, "timeout")
 		slog.Warn("search source transport-timeout; scheduling ox escalation",
 			slog.String("source", r.label),
@@ -360,7 +390,7 @@ func handleSourceError(r directResult, m *metrics.Registry, blockCache *fetch.Di
 		if blockCache != nil {
 			blockCache.Mark(r.label)
 		}
-	case !errors.Is(r.err, context.Canceled) && slices.Contains(oxEscalate, r.label):
+	case !errors.Is(r.err, context.Canceled) && !errors.Is(r.err, context.DeadlineExceeded) && slices.Contains(oxEscalate, r.label):
 		recordSourceResult(m, r.label, "blocked")
 		slog.Warn("search source blocked (non-timeout hard failure); scheduling ox escalation",
 			slog.String("source", r.label),

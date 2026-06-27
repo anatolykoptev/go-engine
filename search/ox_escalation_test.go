@@ -555,3 +555,97 @@ func TestOxEscalation_InfightGauge(t *testing.T) {
 		t.Errorf("ox_browser_inflight after escalation = %v, want 0", inflight)
 	}
 }
+
+// TestOxEscalation_UnmarksOnRenderFail verifies that when the render escalation
+// for an engine fails (fetch error → no results), runOxEscalation calls
+// BlockCache.Unmark so the next direct fan-out re-probes the engine instead of
+// staying pinned for the full 10 m TTL.
+//
+// Rationale: a single transient TCP reset or DNS blip Marks the engine; if the
+// render path also fails, the Mark bought nothing — re-probing direct is cheaper
+// than locking the engine out for 10 m. If render SUCCEEDS, the Mark must stay
+// (engine is genuinely blocked, render is the working path — see
+// TestOxEscalation_StaysMarkedOnRenderSuccess).
+//
+// RED-ON-REVERT contracts:
+//   - Remove the cfg.BlockCache.Unmark(l) call in runOxEscalation →
+//     bc.IsBlocked("ddg") remains true after escalation → test fails.
+//   - Guard the Unmark with outcome=="ok" check → empty/fail also Unmarks? No —
+//     the current code keys on len(res)==0, which covers empty+fail; this test
+//     exercises the fail branch via fetch error.
+func TestOxEscalation_UnmarksOnRenderFail(t *testing.T) {
+	bc := fetch.NewDirectBlockCache(0, 0)
+	bc.Mark("ddg")
+
+	cfg := DirectConfig{
+		OxBrowserFetch: func(_ context.Context, _ string) (string, error) {
+			return "", errors.New("fetch error: connection refused")
+		},
+		OxEscalate: []string{"ddg"},
+		BlockCache: bc,
+	}
+
+	got := runOxEscalation(context.Background(), cfg, "test", 0, 10)
+	if len(got) != 0 {
+		t.Errorf("want 0 results on fetch error, got %d", len(got))
+	}
+	if bc.IsBlocked("ddg") {
+		t.Error("ddg must be Unmarked after failed render so the next round re-probes direct")
+	}
+}
+
+// TestOxEscalation_UnmarksOnRenderEmpty verifies that when the render escalation
+// returns zero results (outcome=empty), runOxEscalation Unmarks the engine.
+//
+// RED-ON-REVERT: Remove Unmark call → bc.IsBlocked("ddg") stays true → test fails.
+func TestOxEscalation_UnmarksOnRenderEmpty(t *testing.T) {
+	bc := fetch.NewDirectBlockCache(0, 0)
+	bc.Mark("ddg")
+
+	cfg := DirectConfig{
+		// Returns valid HTML that parses to zero results.
+		OxBrowserFetch: func(_ context.Context, _ string) (string, error) {
+			return "<html><body></body></html>", nil
+		},
+		OxEscalate: []string{"ddg"},
+		BlockCache: bc,
+	}
+
+	got := runOxEscalation(context.Background(), cfg, "test", 0, 10)
+	if len(got) != 0 {
+		t.Errorf("want 0 results on empty parse, got %d", len(got))
+	}
+	if bc.IsBlocked("ddg") {
+		t.Error("ddg must be Unmarked after empty render so the next round re-probes direct")
+	}
+}
+
+// TestOxEscalation_StaysMarkedOnRenderSuccess verifies that when the render
+// escalation returns results (outcome=ok), the engine stays Marked in BlockCache.
+//
+// Rationale: if render succeeded, the engine IS genuinely blocked for direct
+// requests. The Mark should persist for the TTL so subsequent fan-outs skip
+// the doomed direct attempt and go straight to escalation.
+//
+// RED-ON-REVERT: move Unmark outside the else branch (always call it) →
+// bc.IsBlocked("ddg") becomes false even on success → test fails.
+func TestOxEscalation_StaysMarkedOnRenderSuccess(t *testing.T) {
+	bc := fetch.NewDirectBlockCache(0, 0)
+	bc.Mark("ddg")
+
+	cfg := DirectConfig{
+		OxBrowserFetch: func(_ context.Context, _ string) (string, error) {
+			return minimalDDGHTML, nil
+		},
+		OxEscalate: []string{"ddg"},
+		BlockCache: bc,
+	}
+
+	got := runOxEscalation(context.Background(), cfg, "test", 0, 10)
+	if len(got) == 0 {
+		t.Error("want ≥1 result from successful render escalation")
+	}
+	if !bc.IsBlocked("ddg") {
+		t.Error("ddg must stay Marked after successful render — engine is genuinely blocked for direct")
+	}
+}
