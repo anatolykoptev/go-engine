@@ -124,6 +124,12 @@ type DirectConfig struct {
 	// (non-blocking select) to skip escalation rather than queue on the shared
 	// resource.
 	OxConcurrency int
+
+	// OxRenderDeadline is the per-render-call timeout applied inside runOxEngine
+	// before calling OxBrowserFetch. Each engine's render call gets its own
+	// independent deadline, so a hung render (e.g. DDG anti-bot stall ~20 s) cannot
+	// block a fast one (Brave ~1.5 s). Default defaultOxRenderDeadline (8 s) when zero.
+	OxRenderDeadline time.Duration
 }
 
 // directResult holds the outcome of one source goroutine.
