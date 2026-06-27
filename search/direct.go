@@ -2,6 +2,7 @@ package search
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"sync"
@@ -88,6 +89,13 @@ type DirectConfig struct {
 	// and rely on PerSourceTimeout to bound the overall wall-clock time instead.
 	// Default defaultEarlyReturnAt (10) when zero.
 	EarlyReturnAt int
+
+	// BlockCache, when non-nil, is updated on captcha/rate-limit detections:
+	// collectResults calls Mark(engine-label) so subsequent fan-outs can skip
+	// the doomed direct attempt via IsBlocked. When nil (the default for all
+	// existing callers), no Mark is called — byte-identical behaviour preserved.
+	// Wired by Phase 2 (P2) of the captcha-aware ox-browser escalation plan.
+	BlockCache *fetch.DirectBlockCache
 }
 
 // directResult holds the outcome of one source goroutine.
@@ -255,12 +263,18 @@ func SearchDirect(ctx context.Context, cfg DirectConfig, query, language string)
 		close(ch)
 	}()
 
-	return collectResults(ch, cfg.Metrics, earlyAt, allDoneCancel)
+	return collectResults(ch, cfg.Metrics, earlyAt, allDoneCancel, cfg.BlockCache)
 }
 
 // collectResults drains ch and accumulates results, emitting metrics and triggering
 // early-return cancellation once earlyAt results are collected.
-func collectResults(ch <-chan directResult, m *metrics.Registry, earlyAt int, cancel context.CancelFunc) []sources.Result {
+//
+// captcha outcome: when a source's error matches *ErrRateLimited (anti-bot signal
+// already emitted by the ddg/brave/bing parsers), the outcome is "captcha" rather
+// than "fail", and blockCache.Mark is called if blockCache is non-nil. This keeps
+// legit-empty (nil error, zero results → "empty") semantically distinct from
+// blocked-engine ("captcha") — result-count is never used as the captcha signal.
+func collectResults(ch <-chan directResult, m *metrics.Registry, earlyAt int, cancel context.CancelFunc, blockCache *fetch.DirectBlockCache) []sources.Result {
 	var all []sources.Result
 	var cancelled bool
 	for r := range ch {
@@ -271,8 +285,20 @@ func collectResults(ch <-chan directResult, m *metrics.Registry, earlyAt int, ca
 			)
 		}
 		if r.err != nil {
-			recordSourceResult(m, r.label, "fail")
-			slog.Warn("search source failed", slog.String("source", r.label), slog.Any("error", r.err))
+			var rl *ErrRateLimited
+			if errors.As(r.err, &rl) {
+				recordSourceResult(m, r.label, "captcha")
+				slog.Warn("search source captcha/rate-limited",
+					slog.String("source", r.label),
+					slog.String("engine", rl.Engine),
+				)
+				if blockCache != nil {
+					blockCache.Mark(r.label)
+				}
+			} else {
+				recordSourceResult(m, r.label, "fail")
+				slog.Warn("search source failed", slog.String("source", r.label), slog.Any("error", r.err))
+			}
 			continue
 		}
 		if len(r.results) == 0 {
