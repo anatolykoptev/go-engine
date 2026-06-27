@@ -324,6 +324,13 @@ func runOxEscalation(ctx context.Context, cfg DirectConfig, query string, merged
 			recordOxEscalation(cfg.Metrics, l, outcome)
 			if len(res) > 0 {
 				resultCh <- oxOut{res}
+			} else {
+				// Render did not revive the engine (outcome=empty or fail).
+				// Unmark so the next direct fan-out re-probes instead of
+				// staying pinned for the full 10 m TTL. If render had
+				// returned results, the Mark stays — engine is genuinely
+				// blocked and render is the working path.
+				cfg.BlockCache.Unmark(l)
 			}
 		}(label)
 	}

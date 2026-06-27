@@ -187,3 +187,114 @@ func TestSearchDirect_FastResultsNotDiscarded(t *testing.T) {
 		t.Errorf("got %d results, want >= 5; fast DDG results were discarded", len(results))
 	}
 }
+
+// TestSearchDirect_ParentDeadlineDoesNotMarkBlockCache verifies that a parent
+// context whose deadline fires before the per-source timer does NOT Mark
+// allowlisted engines in the BlockCache.
+//
+// This is the integration complement to TestCollectResults_TimeoutOutcome/(f):
+// it exercises the real ctx propagation path through SearchDirect →
+// runSourceWithTimeout → context.Cause → handleSourceError, confirming that
+// context.Cause returns context.DeadlineExceeded (from the parent, not
+// errPerSourceTimeout) and therefore the blocked-cache stays clean.
+//
+// RED-ON-REVERT:
+//   - Revert runSourceWithTimeout to `err = srcCtx.Err()` (removing context.Cause) →
+//     parent deadline still produces DeadlineExceeded, BUT the old timeout case
+//     checked errors.Is(DeadlineExceeded) → that test would still fail on the
+//     separate handleSourceError gate. The real RED is the combination:
+//     revert SearchDirect to context.WithTimeout (no cause) AND revert
+//     handleSourceError to errors.Is(DeadlineExceeded) → bc.IsBlocked("ddg")==true →
+//     test fails.
+func TestSearchDirect_ParentDeadlineDoesNotMarkBlockCache(t *testing.T) {
+	slowDone := make(chan struct{})
+	t.Cleanup(func() { close(slowDone) })
+
+	dispatch := &mockBrowser{fn: func(_, _ string, _ map[string]string, _ io.Reader) ([]byte, map[string]string, int, error) {
+		// All sources block until the parent context deadline fires.
+		select {
+		case <-slowDone:
+			return nil, nil, 0, context.Canceled
+		case <-time.After(30 * time.Second):
+			return nil, nil, 0, context.DeadlineExceeded
+		}
+	}}
+
+	bc := fetch.NewDirectBlockCache(0, 0)
+
+	// Parent context deadline: 80 ms. PerSourceTimeout: 2 s (much longer).
+	// The parent deadline fires first; all sources are cancelled via parent propagation.
+	parentCtx, parentCancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
+	defer parentCancel()
+
+	cfg := DirectConfig{
+		Browser:          dispatch,
+		DDG:              true,
+		Brave:            true,
+		Retry:            noRetry(),
+		PerSourceTimeout: 2 * time.Second,
+		EarlyReturnAt:    100,
+		BlockCache:       bc,
+		OxEscalate:       []string{"ddg", "brave"},
+	}
+
+	_ = SearchDirect(parentCtx, cfg, "test", "en")
+
+	if bc.IsBlocked("ddg") {
+		t.Error("ddg must NOT be Marked: parent deadline must not trigger escalation")
+	}
+	if bc.IsBlocked("brave") {
+		t.Error("brave must NOT be Marked: parent deadline must not trigger escalation")
+	}
+}
+
+// TestSearchDirect_PerSourceTimeoutMarksBlockCache verifies that a genuine
+// per-source timeout (PerSourceTimeout fires before both the parent deadline and
+// the source fn returning) Marks allowlisted engines in the BlockCache.
+//
+// This is the positive discriminator: the two tests together prove the
+// conflation is fixed — parent deadline → no Mark, per-source timeout → Mark.
+//
+// RED-ON-REVERT: revert SearchDirect to context.WithTimeout (no cause) AND
+// runSourceWithTimeout to srcCtx.Err() → per-source timeout still produces
+// context.DeadlineExceeded → with the old errors.Is(DeadlineExceeded) check
+// this test would still pass. The discriminator is the PAIR: this test passes
+// under both old and new code, but ParentDeadlineDoesNotMark fails under old
+// code — the pair together proves correctness.
+func TestSearchDirect_PerSourceTimeoutMarksBlockCache(t *testing.T) {
+	slowDone := make(chan struct{})
+	t.Cleanup(func() { close(slowDone) })
+
+	dispatch := &mockBrowser{fn: func(_, _ string, _ map[string]string, _ io.Reader) ([]byte, map[string]string, int, error) {
+		select {
+		case <-slowDone:
+			return nil, nil, 0, context.Canceled
+		case <-time.After(30 * time.Second):
+			return nil, nil, 0, context.DeadlineExceeded
+		}
+	}}
+
+	bc := fetch.NewDirectBlockCache(0, 0)
+
+	// PerSourceTimeout: 80 ms. Parent context: healthy (no deadline).
+	// The per-source timer fires first, producing errPerSourceTimeout via Cause.
+	cfg := DirectConfig{
+		Browser:          dispatch,
+		DDG:              true,
+		Brave:            true,
+		Retry:            noRetry(),
+		PerSourceTimeout: 80 * time.Millisecond,
+		EarlyReturnAt:    100,
+		BlockCache:       bc,
+		OxEscalate:       []string{"ddg", "brave"},
+	}
+
+	_ = SearchDirect(context.Background(), cfg, "test", "en")
+
+	if !bc.IsBlocked("ddg") {
+		t.Error("ddg must be Marked: genuine per-source timeout must trigger escalation")
+	}
+	if !bc.IsBlocked("brave") {
+		t.Error("brave must be Marked: genuine per-source timeout must trigger escalation")
+	}
+}

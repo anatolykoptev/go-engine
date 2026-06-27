@@ -232,7 +232,69 @@ func Test_BlockCache_Len(t *testing.T) {
 	}
 }
 
-// Test 6: NewPromMetrics registers correctly on a local registry (no global state).
+// Test 6: DirectBlockCache.Unmark removes a marked host before TTL expiry so
+// the next IsBlocked check returns false and the direct path is re-probed.
+//
+// RED-ON-REVERT contracts:
+//   - Remove Unmark implementation (make it a no-op / delete) → IsBlocked after
+//     Unmark still returns true → test fails on the IsBlocked assertion.
+//   - Unmark on an absent host must not panic → covered by the no-mark sub-case.
+func Test_BlockCache_Unmark(t *testing.T) {
+	t.Run("Mark then Unmark → no longer blocked", func(t *testing.T) {
+		c := NewDirectBlockCache(10*time.Minute, 0)
+
+		c.Mark("ddg")
+		if !c.IsBlocked("ddg") {
+			t.Fatal("ddg must be blocked after Mark")
+		}
+
+		c.Unmark("ddg")
+		if c.IsBlocked("ddg") {
+			t.Error("ddg must NOT be blocked after Unmark (Unmark must remove before TTL expiry)")
+		}
+		if got := c.Len(); got != 0 {
+			t.Errorf("Len() = %d, want 0 after Unmark", got)
+		}
+	})
+
+	t.Run("Unmark on absent host is a no-op (no panic)", func(t *testing.T) {
+		c := NewDirectBlockCache(10*time.Minute, 0)
+		c.Unmark("never-marked") // must not panic
+		if c.IsBlocked("never-marked") {
+			t.Error("never-marked must not be blocked after no-op Unmark")
+		}
+	})
+
+	t.Run("Unmark one host does not evict others", func(t *testing.T) {
+		c := NewDirectBlockCache(10*time.Minute, 0)
+		c.Mark("ddg")
+		c.Mark("brave")
+
+		c.Unmark("ddg")
+
+		if c.IsBlocked("ddg") {
+			t.Error("ddg must NOT be blocked after Unmark")
+		}
+		if !c.IsBlocked("brave") {
+			t.Error("brave must still be blocked — Unmark of ddg must not evict brave")
+		}
+		if got := c.Len(); got != 1 {
+			t.Errorf("Len() = %d, want 1 (only brave remains)", got)
+		}
+	})
+
+	t.Run("Re-Mark after Unmark works correctly", func(t *testing.T) {
+		c := NewDirectBlockCache(10*time.Minute, 0)
+		c.Mark("ddg")
+		c.Unmark("ddg")
+		c.Mark("ddg") // re-probe triggered escalation again — re-mark on next error
+		if !c.IsBlocked("ddg") {
+			t.Error("ddg must be blocked after re-Mark")
+		}
+	})
+}
+
+// Test 7: NewPromMetrics registers correctly on a local registry (no global state).
 func Test_NewPromMetrics_Register(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	m, err := NewPromMetrics(reg)
@@ -255,10 +317,10 @@ func Test_NewPromMetrics_Register(t *testing.T) {
 	}
 
 	want := map[string]bool{
-		"go_engine_fetch_tier_total":                 false,
-		"go_engine_fetch_block_signal_total":         false,
-		"go_engine_fetch_proxy_escalations_total":    false,
-		"go_engine_fetch_direct_block_cache_hosts":   false,
+		"go_engine_fetch_tier_total":               false,
+		"go_engine_fetch_block_signal_total":       false,
+		"go_engine_fetch_proxy_escalations_total":  false,
+		"go_engine_fetch_direct_block_cache_hosts": false,
 	}
 	for _, mf := range mfs {
 		if _, ok := want[mf.GetName()]; ok {

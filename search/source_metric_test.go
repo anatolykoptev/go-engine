@@ -253,30 +253,38 @@ func TestCollectResults_CaptchaOutcome(t *testing.T) {
 }
 
 // TestCollectResults_TimeoutOutcome verifies that collectResults classifies
-// per-source transport-timeouts (context.DeadlineExceeded) as outcome="timeout"
-// and marks the engine in BlockCache — but ONLY for engines in the OxEscalate
-// allowlist. This drives the ox-browser escalation tier in runOxEscalation.
+// genuine per-source timeouts (errPerSourceTimeout via context.Cause) as
+// outcome="timeout" and marks the engine in BlockCache — but ONLY for engines in
+// the OxEscalate allowlist. Crucially, an inherited parent deadline
+// (context.DeadlineExceeded, not errPerSourceTimeout) does NOT trigger timeout or
+// Mark: a short-budget caller must not pin every in-flight engine for 10 m.
 //
 // RED-ON-REVERT contracts:
 //
-//	(a) allowlisted DDG timeout → outcome=timeout + Marked:
-//	    remove the errors.Is(DeadlineExceeded) branch → falls to fail, wantTimeout==1
-//	    fails (got 0); bc.IsBlocked("ddg") == false → Marked assertion fails.
+//	(a) allowlisted DDG per-source timeout (errPerSourceTimeout) → outcome=timeout + Marked:
+//	    change the timeout case back to errors.Is(DeadlineExceeded) →
+//	    errPerSourceTimeout no longer matches → falls to blocked (non-Canceled,
+//	    non-DeadlineExceeded, allowlisted) → outcome=blocked not timeout; test fails.
+//	    OR remove the timeout case entirely → falls to fail; test fails.
 //	(b) non-allowlisted engine timeout → outcome=fail, NOT Marked:
 //	    add non-allowlisted source to oxEscalate → outcome becomes timeout; test fails.
 //	(c) context.Canceled (parent cancel) → outcome=fail, NOT Marked:
-//	    change condition to also match Canceled → wantFail==1 fails (got 0),
-//	    wantTimeout==0 fails (got 1).
+//	    change condition to also match Canceled → wantFail==1 fails (got 0).
 //	(d) OxEscalate nil/empty → timeout never Marked (dormant byte-identical):
 //	    initialise oxEscalate with ["ddg"] → bc.IsBlocked("ddg")==true; test fails.
 //	(e) captcha branch still Marks with oxEscalate set:
 //	    remove captcha Mark call → bc.IsBlocked("ddg")==false; sub-test fails.
+//	(f) parent deadline (DeadlineExceeded) → outcome=fail NOT Marked:
+//	    revert to errors.Is(DeadlineExceeded) in timeout case → DeadlineExceeded
+//	    IS classified as timeout → bc.IsBlocked("ddg")==true; test fails.
 func TestCollectResults_TimeoutOutcome(t *testing.T) {
-	t.Run("(a) allowlisted engine DeadlineExceeded → outcome=timeout + host Marked", func(t *testing.T) {
+	t.Run("(a) allowlisted engine per-source timeout → outcome=timeout + host Marked", func(t *testing.T) {
 		m := metrics.New()
 		bc := fetch.NewDirectBlockCache(0, 0)
 		ch := make(chan directResult, 1)
-		ch <- directResult{label: "ddg", err: context.DeadlineExceeded}
+		// errPerSourceTimeout is what context.Cause(srcCtx) returns when the
+		// per-source WithTimeoutCause deadline fires in runSourceWithTimeout.
+		ch <- directResult{label: "ddg", err: errPerSourceTimeout}
 		close(ch)
 
 		got := collectResults(ch, m, 1000, func() {}, bc, []string{"ddg", "brave"})
@@ -286,7 +294,7 @@ func TestCollectResults_TimeoutOutcome(t *testing.T) {
 			t.Errorf("outcome=timeout: got %v, want 1 (snapshot: %v)", sumOutcome(snap, "timeout"), snap)
 		}
 		if sumOutcome(snap, "fail") != 0 {
-			t.Errorf("outcome=fail: got %v, want 0 (DeadlineExceeded+allowlist must be timeout; snapshot: %v)", sumOutcome(snap, "fail"), snap)
+			t.Errorf("outcome=fail: got %v, want 0 (per-source timeout+allowlist must be timeout; snapshot: %v)", sumOutcome(snap, "fail"), snap)
 		}
 		if !bc.IsBlocked("ddg") {
 			t.Error("ddg must be Marked in BlockCache after transport-timeout so runOxEscalation escalates it")
@@ -379,6 +387,41 @@ func TestCollectResults_TimeoutOutcome(t *testing.T) {
 		}
 		if !bc.IsBlocked("ddg") {
 			t.Error("ddg must be Marked in BlockCache: captcha branch unchanged by new oxEscalate param")
+		}
+	})
+
+	t.Run("(f) parent deadline (DeadlineExceeded from context.Cause) → outcome=fail NOT Marked", func(t *testing.T) {
+		// When the parent context's deadline fires before the per-source timer,
+		// context.Cause(srcCtx) returns context.DeadlineExceeded (propagated from
+		// the parent), not errPerSourceTimeout. This must NOT trigger outcome=timeout
+		// or Mark — a short-budget caller must not pin every in-flight allowlisted
+		// engine for the full 10 m TTL.
+		//
+		// RED-ON-REVERT: revert handleSourceError timeout case to check
+		// errors.Is(r.err, context.DeadlineExceeded) → parent DeadlineExceeded IS
+		// matched → outcome=timeout + bc.IsBlocked("ddg")==true → both assertions fail.
+		m := metrics.New()
+		bc := fetch.NewDirectBlockCache(0, 0)
+		ch := make(chan directResult, 1)
+		// Inject context.DeadlineExceeded directly — this is what context.Cause
+		// returns when the parent ctx deadline fires before the per-source timer.
+		ch <- directResult{label: "ddg", err: context.DeadlineExceeded}
+		close(ch)
+
+		_ = collectResults(ch, m, 1000, func() {}, bc, []string{"ddg", "brave"})
+
+		snap := m.Snapshot()
+		if sumOutcome(snap, "timeout") != 0 {
+			t.Errorf("outcome=timeout: got %v, want 0 (parent deadline must not become timeout; snapshot: %v)", sumOutcome(snap, "timeout"), snap)
+		}
+		if sumOutcome(snap, "blocked") != 0 {
+			t.Errorf("outcome=blocked: got %v, want 0 (parent deadline must not become blocked; snapshot: %v)", sumOutcome(snap, "blocked"), snap)
+		}
+		if bc.IsBlocked("ddg") {
+			t.Error("ddg must NOT be Marked: parent deadline propagation must not trigger escalation")
+		}
+		if sumOutcome(snap, "fail") != 1 {
+			t.Errorf("outcome=fail: got %v, want 1 (parent deadline → fail; snapshot: %v)", sumOutcome(snap, "fail"), snap)
 		}
 	})
 }
