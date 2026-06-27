@@ -6,11 +6,18 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/anatolykoptev/go-engine/fetch"
 	"github.com/anatolykoptev/go-engine/sources"
 	"github.com/anatolykoptev/go-engine/websearch"
 )
+
+// defaultOxRenderDeadline is the per-render-call timeout applied in runOxEngine
+// when DirectConfig.OxRenderDeadline is zero. 8 s bounds a stuck stealth render
+// (e.g. DDG anti-bot navigation stall ~20 s) so a hung engine never blocks the
+// synchronous search response for the full go-wowa navigation deadline.
+const defaultOxRenderDeadline = 8 * time.Second
 
 // runDDG waits on the optional rate limiter then fetches DDG results.
 func runDDG(ctx context.Context, cfg DirectConfig, query string) ([]sources.Result, error) {
@@ -349,12 +356,25 @@ func runOxEscalation(ctx context.Context, cfg DirectConfig, query string, merged
 
 // runOxEngine dispatches to the engine-specific ox-browser SERP runner.
 // Returns (results, outcome) where outcome is "ok", "empty", or "fail".
+//
+// Per-render deadline: a context.WithTimeout is applied before each OxBrowserFetch
+// call so a hung render (e.g. DDG anti-bot stall ~20 s) fails fast and returns
+// outcome="fail" instead of blocking the synchronous SearchDirect response.
+// Each engine's call is independently bounded, so one slow engine cannot eat the
+// deadline of a fast one. On deadline expiry OxBrowserFetch returns an error →
+// outcome="fail" → runOxEscalation records fail + Unmarks the engine (self-heal).
 func runOxEngine(ctx context.Context, cfg DirectConfig, query, label string) ([]sources.Result, string) {
+	deadline := cfg.OxRenderDeadline
+	if deadline <= 0 {
+		deadline = defaultOxRenderDeadline
+	}
+	rctx, cancel := context.WithTimeout(ctx, deadline)
+	defer cancel()
 	switch label {
 	case "ddg":
-		return runOxDDG(ctx, cfg, query)
+		return runOxDDG(rctx, cfg, query)
 	case "brave":
-		return runOxBrave(ctx, cfg, query)
+		return runOxBrave(rctx, cfg, query)
 	default:
 		slog.Warn("ox escalation: unsupported engine", slog.String("engine", label))
 		return nil, "fail"

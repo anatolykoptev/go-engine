@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/anatolykoptev/go-engine/fetch"
 	"github.com/anatolykoptev/go-engine/metrics"
@@ -647,5 +648,112 @@ func TestOxEscalation_StaysMarkedOnRenderSuccess(t *testing.T) {
 	}
 	if !bc.IsBlocked("ddg") {
 		t.Error("ddg must stay Marked after successful render — engine is genuinely blocked for direct")
+	}
+}
+
+// TestOxEscalation_RenderDeadline_HungFails verifies that a render fn that blocks
+// until its context is cancelled (simulating DDG anti-bot stall) returns a "fail"
+// outcome within ~OxRenderDeadline, not the full go-wowa navigation deadline (~20 s).
+// On deadline-triggered failure the engine is Unmarked for re-probe (self-heal).
+//
+// RED-ON-REVERT: remove the context.WithTimeout wrap in runOxEngine → OxBrowserFetch
+// blocks until the parent ctx times out (here: up to 3×renderDeadline check window).
+// The elapsed check catches this: without the guard, elapsed ≈ 3×renderDeadline.
+func TestOxEscalation_RenderDeadline_HungFails(t *testing.T) {
+	const renderDeadline = 40 * time.Millisecond
+	bc := fetch.NewDirectBlockCache(0, 0)
+	bc.Mark("ddg")
+
+	cfg := DirectConfig{
+		// Blocks until ctx is cancelled — simulates a stuck navigation.
+		OxBrowserFetch: func(ctx context.Context, _ string) (string, error) {
+			<-ctx.Done()
+			return "", ctx.Err()
+		},
+		OxEscalate:       []string{"ddg"},
+		BlockCache:       bc,
+		OxRenderDeadline: renderDeadline,
+	}
+
+	start := time.Now()
+	got := runOxEscalation(context.Background(), cfg, "test", 0, 10)
+	elapsed := time.Since(start)
+
+	if len(got) != 0 {
+		t.Errorf("want 0 results from hung render, got %d", len(got))
+	}
+	// Must return within 5× the deadline (generous for slow CI). Without the guard
+	// the render blocks indefinitely; 5× gives ~200 ms tolerance before failing.
+	if elapsed > 5*renderDeadline {
+		t.Errorf("elapsed %v > 5×deadline (%v): per-render deadline guard did not fire", elapsed, 5*renderDeadline)
+	}
+	// Deadline-failed render is a "fail" outcome → engine must be Unmarked.
+	if bc.IsBlocked("ddg") {
+		t.Error("ddg must be Unmarked after deadline-failed render so next round re-probes direct")
+	}
+}
+
+// TestOxEscalation_RenderDeadline_FastSucceeds verifies that a render fn completing
+// well within OxRenderDeadline succeeds and the engine stays Marked.
+// Guards against an over-tight deadline that kills healthy renders.
+//
+// RED-ON-REVERT (deadline guard removed): the context passed to OxBrowserFetch has
+// no deadline → ctx.Deadline() returns ok=false → captured test assertion fails.
+func TestOxEscalation_RenderDeadline_FastSucceeds(t *testing.T) {
+	bc := fetch.NewDirectBlockCache(0, 0)
+	bc.Mark("ddg")
+
+	cfg := DirectConfig{
+		OxBrowserFetch: func(_ context.Context, _ string) (string, error) {
+			return minimalDDGHTML, nil // fast — returns immediately
+		},
+		OxEscalate:       []string{"ddg"},
+		BlockCache:       bc,
+		OxRenderDeadline: 5 * time.Second, // generous; healthy render must not hit it
+	}
+
+	got := runOxEscalation(context.Background(), cfg, "test", 0, 10)
+	if len(got) == 0 {
+		t.Error("want ≥1 result from fast render under deadline guard")
+	}
+	if !bc.IsBlocked("ddg") {
+		t.Error("ddg must stay Marked after successful render within deadline")
+	}
+}
+
+// TestOxEscalation_RenderDeadline_ZeroUsesDefault verifies that when OxRenderDeadline
+// is zero the 8 s defaultOxRenderDeadline is applied — i.e. the context passed to
+// OxBrowserFetch has a deadline ~8 s from the call site, not zero (immediately expired).
+//
+// RED-ON-REVERT (zero check removed): context.WithTimeout(ctx, 0) gives a deadline
+// of time.Now() → capturedDeadline.Sub(start) ≈ 0, not ~8 s → test fails.
+func TestOxEscalation_RenderDeadline_ZeroUsesDefault(t *testing.T) {
+	bc := fetch.NewDirectBlockCache(0, 0)
+	bc.Mark("ddg")
+
+	var capturedDeadline time.Time
+	var deadlineSet bool
+	cfg := DirectConfig{
+		OxBrowserFetch: func(ctx context.Context, _ string) (string, error) {
+			capturedDeadline, deadlineSet = ctx.Deadline()
+			return minimalDDGHTML, nil
+		},
+		OxEscalate:       []string{"ddg"},
+		BlockCache:       bc,
+		OxRenderDeadline: 0, // zero → must apply defaultOxRenderDeadline (8 s)
+	}
+
+	start := time.Now()
+	runOxEscalation(context.Background(), cfg, "test", 0, 10)
+
+	if !deadlineSet {
+		t.Fatal("context passed to OxBrowserFetch must carry a deadline when OxRenderDeadline=0")
+	}
+	// Deadline should be ~8 s from start (defaultOxRenderDeadline). Allow ±1 s for
+	// execution latency on slow CI.
+	got := capturedDeadline.Sub(start)
+	const want = defaultOxRenderDeadline
+	if got < want-time.Second || got > want+time.Second {
+		t.Errorf("context deadline offset = %v, want ~%v (defaultOxRenderDeadline)", got, want)
 	}
 }
