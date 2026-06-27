@@ -383,6 +383,149 @@ func TestCollectResults_TimeoutOutcome(t *testing.T) {
 	})
 }
 
+// TestCollectResults_BlockedOutcome verifies that an allowlisted engine that fails
+// with ANY hard error (not captcha, not DeadlineExceeded) is classified as
+// outcome="blocked" and Marked in BlockCache so runOxEscalation will escalate it
+// to the stealth-render tier.
+//
+// This closes the DDG d.js-challenge gap: the challenge returns a JS body that the
+// DDG decoder cannot parse as JSON, producing errors.New("ddg d.js: json parse:
+// invalid character 'l'..."). Under v1.44 this fell through to outcome="fail" and
+// was never Marked → escalation never fired. With the new blocked case it Marks.
+//
+// RED-ON-REVERT contracts:
+//
+//	(a) allowlisted DDG parse-error → outcome=blocked + Marked:
+//	    remove the blocked case → falls to default → outcome=fail; test fails.
+//	    remove the allowlist check → non-allowlisted source also Marks; (b) fails.
+//	(b) non-allowlisted engine same error → outcome=fail NOT Marked:
+//	    add non-allowlisted source to oxEscalate → becomes blocked; test fails.
+//	(c) allowlisted context.Canceled → outcome=fail NOT Marked:
+//	    remove !errors.Is(Canceled) guard → Canceled becomes blocked; test fails.
+//	(d) allowlisted nil error (legit-empty path) → NOT covered by this function
+//	    (collectResults skips handleSourceError for nil err); guard in collectResults.
+//	(e) oxEscalate nil/empty → no blocked-mark (dormant byte-identical):
+//	    set oxEscalate=["ddg"] in sub-test (e) → ddg Marked; test fails.
+//	(f) captcha + timeout still Mark with their own labels under oxEscalate set:
+//	    covered by existing TestCollectResults_CaptchaOutcome (e) and
+//	    TestCollectResults_TimeoutOutcome (e).
+func TestCollectResults_BlockedOutcome(t *testing.T) {
+	parseErr := errors.New("ddg d.js: ddg json parse: invalid character 'l' looking for beginning of value")
+
+	t.Run("(a) allowlisted engine parse-error → outcome=blocked + host Marked", func(t *testing.T) {
+		m := metrics.New()
+		bc := fetch.NewDirectBlockCache(0, 0)
+		ch := make(chan directResult, 1)
+		ch <- directResult{label: "ddg", err: parseErr}
+		close(ch)
+
+		got := collectResults(ch, m, 1000, func() {}, bc, []string{"ddg", "brave"})
+
+		snap := m.Snapshot()
+		if sumOutcome(snap, "blocked") != 1 {
+			t.Errorf("outcome=blocked: got %v, want 1 (snapshot: %v)", sumOutcome(snap, "blocked"), snap)
+		}
+		if sumOutcome(snap, "fail") != 0 {
+			t.Errorf("outcome=fail: got %v, want 0 (parse-error+allowlist must be blocked, not fail; snapshot: %v)", sumOutcome(snap, "fail"), snap)
+		}
+		if !bc.IsBlocked("ddg") {
+			t.Error("ddg must be Marked in BlockCache after parse-error on allowlisted engine")
+		}
+		if len(got) != 0 {
+			t.Errorf("result count: got %d, want 0", len(got))
+		}
+	})
+
+	t.Run("(b) non-allowlisted engine same parse-error → outcome=fail NOT Marked", func(t *testing.T) {
+		m := metrics.New()
+		bc := fetch.NewDirectBlockCache(0, 0)
+		ch := make(chan directResult, 1)
+		ch <- directResult{label: "yep", err: parseErr}
+		close(ch)
+
+		_ = collectResults(ch, m, 1000, func() {}, bc, []string{"ddg", "brave"})
+
+		snap := m.Snapshot()
+		if sumOutcome(snap, "fail") != 1 {
+			t.Errorf("outcome=fail: got %v, want 1 (non-allowlisted source must stay fail; snapshot: %v)", sumOutcome(snap, "fail"), snap)
+		}
+		if sumOutcome(snap, "blocked") != 0 {
+			t.Errorf("outcome=blocked: got %v, want 0 (non-allowlisted engine must not be marked; snapshot: %v)", sumOutcome(snap, "blocked"), snap)
+		}
+		if bc.IsBlocked("yep") {
+			t.Error("yep must NOT be Marked: non-allowlisted sources must never trigger escalation")
+		}
+	})
+
+	t.Run("(c) allowlisted engine context.Canceled → outcome=fail NOT Marked", func(t *testing.T) {
+		m := metrics.New()
+		bc := fetch.NewDirectBlockCache(0, 0)
+		ch := make(chan directResult, 1)
+		ch <- directResult{label: "ddg", err: context.Canceled}
+		close(ch)
+
+		_ = collectResults(ch, m, 1000, func() {}, bc, []string{"ddg", "brave"})
+
+		snap := m.Snapshot()
+		if sumOutcome(snap, "fail") != 1 {
+			t.Errorf("outcome=fail: got %v, want 1 (Canceled must be fail, not blocked; snapshot: %v)", sumOutcome(snap, "fail"), snap)
+		}
+		if sumOutcome(snap, "blocked") != 0 {
+			t.Errorf("outcome=blocked: got %v, want 0 (Canceled must never Mark; snapshot: %v)", sumOutcome(snap, "blocked"), snap)
+		}
+		if bc.IsBlocked("ddg") {
+			t.Error("ddg must NOT be Marked: context.Canceled is a parent early-return, not a block signal")
+		}
+	})
+
+	t.Run("(d) allowlisted engine nil error (legit-empty) → outcome=empty NOT Marked", func(t *testing.T) {
+		m := metrics.New()
+		bc := fetch.NewDirectBlockCache(0, 0)
+		ch := make(chan directResult, 1)
+		// nil err, zero results: handleSourceError is NOT called for this path.
+		ch <- directResult{label: "ddg", results: nil, err: nil}
+		close(ch)
+
+		got := collectResults(ch, m, 1000, func() {}, bc, []string{"ddg", "brave"})
+
+		snap := m.Snapshot()
+		if sumOutcome(snap, "empty") != 1 {
+			t.Errorf("outcome=empty: got %v, want 1 (legit-empty must stay empty; snapshot: %v)", sumOutcome(snap, "empty"), snap)
+		}
+		if sumOutcome(snap, "blocked") != 0 {
+			t.Errorf("outcome=blocked: got %v, want 0 (nil-err empty must never be blocked; snapshot: %v)", sumOutcome(snap, "blocked"), snap)
+		}
+		if bc.IsBlocked("ddg") {
+			t.Error("ddg must NOT be Marked: legit-empty is not a block signal")
+		}
+		if len(got) != 0 {
+			t.Errorf("result count: got %d, want 0", len(got))
+		}
+	})
+
+	t.Run("(e) oxEscalate nil → parse-error stays fail NOT Marked (dormant byte-identical)", func(t *testing.T) {
+		m := metrics.New()
+		bc := fetch.NewDirectBlockCache(0, 0)
+		ch := make(chan directResult, 1)
+		ch <- directResult{label: "ddg", err: parseErr}
+		close(ch)
+
+		_ = collectResults(ch, m, 1000, func() {}, bc, nil)
+
+		snap := m.Snapshot()
+		if sumOutcome(snap, "blocked") != 0 {
+			t.Errorf("outcome=blocked: got %v, want 0 when oxEscalate is nil (dormant-byte-identical; snapshot: %v)", sumOutcome(snap, "blocked"), snap)
+		}
+		if bc.IsBlocked("ddg") {
+			t.Error("ddg must NOT be Marked when oxEscalate is nil (dormant invariant)")
+		}
+		// Stays fail — same behaviour as v1.44 with empty oxEscalate.
+		if sumOutcome(snap, "fail") != 1 {
+			t.Errorf("outcome=fail: got %v, want 1 (dormant → falls to default; snapshot: %v)", sumOutcome(snap, "fail"), snap)
+		}
+	})
+}
+
 // contains reports whether s contains substr.
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(s) > 0 && stringContains(s, substr))

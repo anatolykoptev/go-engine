@@ -329,10 +329,17 @@ func SearchDirect(ctx context.Context, cfg DirectConfig, query, language string)
 //   - context.DeadlineExceeded AND label in oxEscalate → outcome="timeout"; Marks.
 //     context.Canceled (parent early-return) does NOT match DeadlineExceeded, so
 //     user-triggered cancellation is never treated as a transport block.
+//   - any other non-nil error AND label in oxEscalate AND NOT context.Canceled
+//     → outcome="blocked"; Marks. This catches anti-bot JS challenges (e.g. DDG
+//     d.js), HTTP-block responses, and parse errors from a datacenter-detected IP.
+//     These are semantically identical to a timeout block: the direct path is
+//     unusable and stealth-render is the only working option.
 //   - anything else          → outcome="fail"; never Marks.
 //
-// The allowlist guard ensures only OxEscalate-configured engines ({ddg, brave}) are
-// marked on timeout; a random slow source must not trigger a 30s Chromium render.
+// The allowlist guard (oxEscalate) ensures only configured engines ({ddg, brave})
+// are marked and escalated; a random source failing stays outcome="fail" and is
+// never promoted to the Chromium render tier. When oxEscalate is nil/empty the
+// blocked case never fires — behaviour is byte-identical to v1.44.
 func handleSourceError(r directResult, m *metrics.Registry, blockCache *fetch.DirectBlockCache, oxEscalate []string) {
 	var rl *ErrRateLimited
 	switch {
@@ -349,6 +356,15 @@ func handleSourceError(r directResult, m *metrics.Registry, blockCache *fetch.Di
 		recordSourceResult(m, r.label, "timeout")
 		slog.Warn("search source transport-timeout; scheduling ox escalation",
 			slog.String("source", r.label),
+		)
+		if blockCache != nil {
+			blockCache.Mark(r.label)
+		}
+	case !errors.Is(r.err, context.Canceled) && slices.Contains(oxEscalate, r.label):
+		recordSourceResult(m, r.label, "blocked")
+		slog.Warn("search source blocked (non-timeout hard failure); scheduling ox escalation",
+			slog.String("source", r.label),
+			slog.Any("error", r.err),
 		)
 		if blockCache != nil {
 			blockCache.Mark(r.label)
@@ -376,6 +392,13 @@ func handleSourceError(r directResult, m *metrics.Registry, blockCache *fetch.Di
 // — over-escalation guard: a random slow source must not trigger an expensive
 // Chromium render. When oxEscalate is nil/empty no timeout is ever marked
 // (dormant-byte-identical with the pre-P2 path).
+//
+// blocked outcome: any other non-nil, non-Canceled error from an allowlisted engine
+// (e.g. a DDG anti-bot JS challenge returning a non-JSON body, or an HTTP-block
+// response) is classified as outcome="blocked" and Marks the engine — identical
+// escalation semantics to timeout. This closes the detection gap where d.js
+// challenges were silently swallowed as outcome="fail" without ever triggering the
+// stealth-render tier.
 func collectResults(ch <-chan directResult, m *metrics.Registry, earlyAt int, cancel context.CancelFunc, blockCache *fetch.DirectBlockCache, oxEscalate []string) []sources.Result {
 	var all []sources.Result
 	var cancelled bool
