@@ -85,3 +85,44 @@ func TestBraveSearchURL(t *testing.T) {
 		})
 	}
 }
+
+// TestBingSearchURL verifies that BingSearchURL returns the correct GET URL
+// for the Bing Search HTML SERP endpoint. P2 passes this URL to ox-browser
+// /fetch so that the SERP request shape stays single-owned in websearch.
+func TestBingSearchURL(t *testing.T) {
+	tests := []struct {
+		name  string
+		query string
+		want  string
+	}{
+		{
+			name:  "simple query",
+			query: "hello world",
+			want:  "https://www.bing.com/search?q=hello+world",
+		},
+		{
+			name:  "special characters",
+			query: "golang & rust",
+			want:  "https://www.bing.com/search?q=golang+%26+rust",
+		},
+		{
+			name:  "empty query",
+			query: "",
+			want:  "https://www.bing.com/search?q=",
+		},
+		{
+			name:  "url meta-chars",
+			query: "site:example.com foo=bar",
+			want:  "https://www.bing.com/search?q=site%3Aexample.com+foo%3Dbar",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := BingSearchURL(tt.query)
+			if got != tt.want {
+				t.Errorf("BingSearchURL(%q) = %q, want %q", tt.query, got, tt.want)
+			}
+		})
+	}
+}
