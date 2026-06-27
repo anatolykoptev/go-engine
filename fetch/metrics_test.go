@@ -292,6 +292,36 @@ func Test_BlockCache_Unmark(t *testing.T) {
 			t.Error("ddg must be blocked after re-Mark")
 		}
 	})
+
+	t.Run("order slice stays bounded across Mark→Unmark cycles", func(t *testing.T) {
+		// The self-heal cycle (Mark on timeout → render empty/fail → Unmark →
+		// next fan-out re-Marks) keeps len(items) at 0..N, never reaching cap,
+		// so evictOldest is never called. Without F2 fix, each Mark appends to
+		// order without Unmark pruning it → order grows unboundedly.
+		//
+		// RED-ON-REVERT: remove the for-loop order-splice from Unmark →
+		// len(c.order) == 100 after 100 cycles → test fails.
+		c := NewDirectBlockCache(10*time.Minute, 0)
+
+		for range 100 {
+			c.Mark("ddg")
+			c.Unmark("ddg")
+		}
+
+		c.mu.Lock()
+		orderLen := len(c.order)
+		c.mu.Unlock()
+
+		// Each Unmark must prune its entry; after 100 Mark+Unmark cycles the
+		// last op is Unmark, so order must be empty.
+		if orderLen != 0 {
+			t.Errorf("c.order len = %d after 100 Mark→Unmark cycles, want 0 "+
+				"(Unmark must prune order to prevent unbounded growth; F2 regression)", orderLen)
+		}
+		if got := c.Len(); got != 0 {
+			t.Errorf("Len() = %d, want 0 after final Unmark", got)
+		}
+	})
 }
 
 // Test 7: NewPromMetrics registers correctly on a local registry (no global state).

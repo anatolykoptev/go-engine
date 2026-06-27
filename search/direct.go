@@ -168,6 +168,14 @@ func runSourceWithTimeout(srcCtx context.Context, label string, fn func(context.
 	select {
 	case r := <-done:
 		res, err = r.res, r.err
+		// If fn returned context.DeadlineExceeded because it detected the
+		// per-source srcCtx deadline (common for HTTP clients that propagate
+		// ctx cancellation), reconcile to the srcCtx cause. This collapses
+		// the select race: whether done or srcCtx.Done() fires first, both
+		// branches produce the same error for handleSourceError to classify.
+		if err != nil && srcCtx.Err() != nil && errors.Is(err, context.DeadlineExceeded) {
+			err = context.Cause(srcCtx)
+		}
 	case <-srcCtx.Done():
 		// Use context.Cause to distinguish a genuine per-source deadline
 		// (returns errPerSourceTimeout, set by WithTimeoutCause in SearchDirect)

@@ -2,6 +2,7 @@ package search
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/anatolykoptev/go-engine/fetch"
+	"github.com/anatolykoptev/go-engine/sources"
 )
 
 // ddgHTML returns minimal DDG HTML with n results.
@@ -296,5 +298,58 @@ func TestSearchDirect_PerSourceTimeoutMarksBlockCache(t *testing.T) {
 	}
 	if !bc.IsBlocked("brave") {
 		t.Error("brave must be Marked: genuine per-source timeout must trigger escalation")
+	}
+}
+
+// TestRunSourceWithTimeout_DoneBranchDeadlineReconciled is the F3 regression
+// guard for the F1 fix: when a source fn returns context.DeadlineExceeded
+// through the done channel AND the per-source srcCtx has also expired, the
+// error must be reconciled to errPerSourceTimeout so handleSourceError
+// classifies it as timeout (not fail) and the engine gets Marked.
+//
+// Production scenario: BrowserDoer running on srcCtx detects the per-source
+// deadline via its HTTP client, returns context.DeadlineExceeded through done.
+// The select may pick done before srcCtx.Done(); without F1 the raw
+// DeadlineExceeded propagates → timeout-case (errPerSourceTimeout) misses →
+// blocked-case excludes DeadlineExceeded → falls to fail → no Mark.
+//
+// RED-ON-REVERT: remove the done-branch reconciliation block in
+// runSourceWithTimeout:
+//
+//	if err != nil && srcCtx.Err() != nil && errors.Is(err, context.DeadlineExceeded) {
+//	    err = context.Cause(srcCtx)
+//	}
+//
+// → when done branch wins the select race, result.err stays context.DeadlineExceeded
+// ≠ errPerSourceTimeout → t.Fatalf fires (probability ≈ 1 over 200 iterations).
+func TestRunSourceWithTimeout_DoneBranchDeadlineReconciled(t *testing.T) {
+	// Run many iterations: Go's select randomly chooses among ready cases.
+	// With F1 both branches converge to errPerSourceTimeout. Without F1,
+	// the done branch returns context.DeadlineExceeded → test fails.
+	const iterations = 200
+
+	for i := range iterations {
+		// Per-source context: WithTimeoutCause so Cause == errPerSourceTimeout.
+		srcCtx, srcCancel := context.WithTimeoutCause(
+			context.Background(), time.Nanosecond, errPerSourceTimeout)
+		// Ensure srcCtx has fired: srcCtx.Err() != nil, Cause = errPerSourceTimeout.
+		<-srcCtx.Done()
+		srcCancel()
+
+		// fn returns context.DeadlineExceeded immediately (simulates BrowserDoer
+		// aborting when its internal HTTP client detects per-source deadline).
+		fn := func(_ context.Context) ([]sources.Result, error) {
+			return nil, context.DeadlineExceeded
+		}
+
+		ch := make(chan directResult, 1)
+		runSourceWithTimeout(srcCtx, "ddg", fn, ch)
+		r := <-ch
+
+		if !errors.Is(r.err, errPerSourceTimeout) {
+			t.Fatalf("iter %d: err = %v, want errPerSourceTimeout "+
+				"(done-branch must reconcile fn's DeadlineExceeded to errPerSourceTimeout "+
+				"when srcCtx fired; F1 regression)", i, r.err)
+		}
 	}
 }
