@@ -4,6 +4,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/anatolykoptev/go-engine/fetch"
 	"github.com/anatolykoptev/go-engine/metrics"
 	"github.com/anatolykoptev/go-engine/sources"
 )
@@ -127,7 +128,7 @@ func TestCollectResults_Outcomes(t *testing.T) {
 			close(ch)
 
 			noopCancel := func() {}
-			got := collectResults(ch, m, 1000, noopCancel)
+			got := collectResults(ch, m, 1000, noopCancel, nil)
 
 			snap := m.Snapshot()
 
@@ -162,6 +163,92 @@ func sumOutcome(snap map[string]int64, o string) int64 {
 		}
 	}
 	return total
+}
+
+// TestCollectResults_CaptchaOutcome verifies that a source returning
+// *ErrRateLimited (the typed anti-bot signal) is classified as outcome=captcha
+// rather than outcome=fail, and that the engine is Marked in BlockCache when
+// non-nil. Legit-empty (nil error, zero results) must stay outcome=empty and
+// must NOT mark the BlockCache — this is the false-positive guard.
+//
+// RED-ON-REVERT contracts:
+//   - Revert the captcha branch in collectResults (fall through to fail):
+//     wantCaptcha==1 fails (got 0), wantFail==0 fails (got 1).
+//   - Revert the empty-is-not-captcha guard (key on result count):
+//     wantCaptcha==0 fails for the empty sub-test (got 1).
+//   - Remove the nil-blockCache guard:
+//     nil-blockCache sub-test panics → test failure.
+func TestCollectResults_CaptchaOutcome(t *testing.T) {
+	t.Run("ErrRateLimited → outcome captcha + host marked", func(t *testing.T) {
+		m := metrics.New()
+		bc := fetch.NewDirectBlockCache(0, 0) // default TTL + cap
+		ch := make(chan directResult, 1)
+		ch <- directResult{label: "ddg", err: &ErrRateLimited{Engine: "ddg"}}
+		close(ch)
+
+		got := collectResults(ch, m, 1000, func() {}, bc)
+
+		snap := m.Snapshot()
+		if sumOutcome(snap, "captcha") != 1 {
+			t.Errorf("outcome=captcha: got %v, want 1 (snapshot: %v)", sumOutcome(snap, "captcha"), snap)
+		}
+		if sumOutcome(snap, "fail") != 0 {
+			t.Errorf("outcome=fail: got %v, want 0 (ErrRateLimited must not be classified as fail; snapshot: %v)", sumOutcome(snap, "fail"), snap)
+		}
+		if !bc.IsBlocked("ddg") {
+			t.Error("ddg must be Marked in BlockCache after captcha detection")
+		}
+		if len(got) != 0 {
+			t.Errorf("result count: got %d, want 0", len(got))
+		}
+	})
+
+	t.Run("zero results no error → empty NOT captcha host NOT marked", func(t *testing.T) {
+		m := metrics.New()
+		bc := fetch.NewDirectBlockCache(0, 0)
+		ch := make(chan directResult, 1)
+		ch <- directResult{label: "brave", results: nil, err: nil}
+		close(ch)
+
+		got := collectResults(ch, m, 1000, func() {}, bc)
+
+		snap := m.Snapshot()
+		if sumOutcome(snap, "empty") != 1 {
+			t.Errorf("outcome=empty: got %v, want 1 (snapshot: %v)", sumOutcome(snap, "empty"), snap)
+		}
+		if sumOutcome(snap, "captcha") != 0 {
+			t.Errorf("outcome=captcha: got %v, want 0 (legit-empty must not become captcha; snapshot: %v)", sumOutcome(snap, "captcha"), snap)
+		}
+		if bc.IsBlocked("brave") {
+			t.Error("brave must NOT be Marked in BlockCache on legit-empty result")
+		}
+		if len(got) != 0 {
+			t.Errorf("result count: got %d, want 0", len(got))
+		}
+	})
+
+	t.Run("nil BlockCache + ErrRateLimited → no panic captcha counted", func(t *testing.T) {
+		m := metrics.New()
+		ch := make(chan directResult, 1)
+		ch <- directResult{label: "ddg", err: &ErrRateLimited{Engine: "ddg"}}
+		close(ch)
+
+		defer func() {
+			if r := recover(); r != nil {
+				t.Fatalf("collectResults panicked with nil blockCache: %v", r)
+			}
+		}()
+
+		got := collectResults(ch, m, 1000, func() {}, nil)
+
+		snap := m.Snapshot()
+		if sumOutcome(snap, "captcha") != 1 {
+			t.Errorf("outcome=captcha: got %v, want 1 (nil BlockCache must not suppress captcha metric; snapshot: %v)", sumOutcome(snap, "captcha"), snap)
+		}
+		if len(got) != 0 {
+			t.Errorf("result count: got %d, want 0", len(got))
+		}
+	})
 }
 
 // contains reports whether s contains substr.

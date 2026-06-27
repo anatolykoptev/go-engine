@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"strings"
+	"sync"
 
 	"github.com/anatolykoptev/go-engine/fetch"
 	"github.com/anatolykoptev/go-engine/sources"
@@ -246,4 +247,151 @@ func runMojeek(ctx context.Context, cfg DirectConfig, query string) ([]sources.R
 		browser = cfg.MojeekBrowser
 	}
 	return SearchMojeekDirect(ctx, browser, query, cfg.Metrics)
+}
+
+// runOxEscalation is the post-fan-out captcha-escalation tier that routes
+// captcha-blocked search engines through the ox-browser stealth Chromium (/fetch).
+//
+// Dormant-by-default invariant (CRITICAL): when OxBrowserFetch, OxEscalate, or
+// BlockCache are nil/empty, this function returns nil with zero ox-browser calls —
+// byte-identical to the pre-P2 SearchDirect path.
+//
+// Post-fan-out placement: ox-browser /fetch is ~30s; runSourceWithTimeout cancels
+// sources at 6s, so escalation MUST run after collectResults, on the original ctx.
+//
+// EarlyReturnAt short-circuit: if the fan-out already produced ≥earlyAt results,
+// skip escalation (existing results suffice — no need to burn Chromium).
+//
+// Concurrency: a channel-based TryAcquire semaphore (cap=OxConcurrency, default 2)
+// bounds concurrent Chromium calls within one SearchDirect invocation. Excess
+// requests are skipped (not queued) to avoid stacking on the shared 4-core resource.
+//
+// Allowlist v1 = {ddg, brave} — GET-fetchable. Startpage is POST-only → excluded
+// (ADR-6: widening /fetch to method+body is a guarded one-way SSRF door).
+func runOxEscalation(ctx context.Context, cfg DirectConfig, query string, mergedLen, earlyAt int) []sources.Result {
+	if cfg.OxBrowserFetch == nil || len(cfg.OxEscalate) == 0 || cfg.BlockCache == nil {
+		return nil
+	}
+	if mergedLen >= earlyAt {
+		slog.Debug("ox escalation: fan-out threshold met, skipping",
+			slog.Int("merged", mergedLen), slog.Int("earlyAt", earlyAt))
+		return nil
+	}
+
+	var eligible []string
+	for _, label := range cfg.OxEscalate {
+		if cfg.BlockCache.IsBlocked(label) {
+			eligible = append(eligible, label)
+		}
+	}
+	if len(eligible) == 0 {
+		return nil
+	}
+
+	slog.Info("ox escalation: starting", slog.Int("engines", len(eligible)))
+
+	concurrency := cfg.OxConcurrency
+	if concurrency <= 0 {
+		concurrency = 2
+	}
+	// Channel-based TryAcquire semaphore: send = acquire, recv = release.
+	sem := make(chan struct{}, concurrency)
+
+	type oxOut struct{ results []sources.Result }
+	resultCh := make(chan oxOut, len(eligible))
+	var wg sync.WaitGroup
+
+	for _, label := range eligible {
+		// TryAcquire: non-blocking — skip if semaphore full to avoid queuing
+		// on the shared Chromium resource (go-wowa ContextPool is the authoritative
+		// server-side bound; client TryAcquire is a courtesy first-line cap).
+		select {
+		case sem <- struct{}{}:
+		default:
+			slog.Debug("ox escalation: semaphore full, skipping engine", slog.String("engine", label))
+			recordOxEscalation(cfg.Metrics, label, "skipped")
+			continue
+		}
+		wg.Add(1)
+		go func(l string) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			if cfg.Metrics != nil {
+				cfg.Metrics.Gauge(metricOxInflight).Inc()
+				defer cfg.Metrics.Gauge(metricOxInflight).Dec()
+			}
+			res, outcome := runOxEngine(ctx, cfg, query, l)
+			recordOxEscalation(cfg.Metrics, l, outcome)
+			if len(res) > 0 {
+				resultCh <- oxOut{res}
+			}
+		}(label)
+	}
+
+	go func() {
+		wg.Wait()
+		close(resultCh)
+	}()
+
+	var all []sources.Result
+	for r := range resultCh {
+		all = append(all, r.results...)
+	}
+	return all
+}
+
+// runOxEngine dispatches to the engine-specific ox-browser SERP runner.
+// Returns (results, outcome) where outcome is "ok", "empty", or "fail".
+func runOxEngine(ctx context.Context, cfg DirectConfig, query, label string) ([]sources.Result, string) {
+	switch label {
+	case "ddg":
+		return runOxDDG(ctx, cfg, query)
+	case "brave":
+		return runOxBrave(ctx, cfg, query)
+	default:
+		slog.Warn("ox escalation: unsupported engine", slog.String("engine", label))
+		return nil, "fail"
+	}
+}
+
+// runOxDDG fetches and parses a DuckDuckGo HTML SERP via ox-browser stealth Chromium.
+// URL built by websearch.DDGHTMLURL (single-owned in websearch per ADR-8).
+// Parsed by websearch.ParseDDGHTML (proven in prod via searchViaOxBrowser).
+func runOxDDG(ctx context.Context, cfg DirectConfig, query string) ([]sources.Result, string) {
+	u := websearch.DDGHTMLURL(query)
+	html, err := cfg.OxBrowserFetch(ctx, u)
+	if err != nil {
+		slog.Warn("ox escalation ddg: fetch error", slog.Any("error", err))
+		return nil, "fail"
+	}
+	results, err := websearch.ParseDDGHTML([]byte(html))
+	if err != nil {
+		slog.Warn("ox escalation ddg: parse error", slog.Any("error", err))
+		return nil, "fail"
+	}
+	if len(results) == 0 {
+		return nil, "empty"
+	}
+	return results, "ok"
+}
+
+// runOxBrave fetches and parses a Brave Search HTML SERP via ox-browser stealth Chromium.
+// URL built by websearch.BraveSearchURL; parsed by websearch.ParseBraveHTML.
+// Brave is GET-fetchable (ADR-6); Startpage excluded (POST-only → SSRF risk).
+func runOxBrave(ctx context.Context, cfg DirectConfig, query string) ([]sources.Result, string) {
+	u := websearch.BraveSearchURL(query)
+	html, err := cfg.OxBrowserFetch(ctx, u)
+	if err != nil {
+		slog.Warn("ox escalation brave: fetch error", slog.Any("error", err))
+		return nil, "fail"
+	}
+	results, err := websearch.ParseBraveHTML([]byte(html))
+	if err != nil {
+		slog.Warn("ox escalation brave: parse error", slog.Any("error", err))
+		return nil, "fail"
+	}
+	if len(results) == 0 {
+		return nil, "empty"
+	}
+	return results, "ok"
 }

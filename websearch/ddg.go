@@ -12,10 +12,10 @@ import (
 )
 
 const (
-	ddgDefaultRegion = "wt-wt"
-	ddgHTMLEndpoint  = "https://html.duckduckgo.com/html/"
-	ddgDJSEndpoint   = "https://links.duckduckgo.com/d.js"
-	ddgHomepage      = "https://duckduckgo.com/"
+	ddgDefaultRegion  = "wt-wt"
+	ddgHTMLEndpoint   = "https://html.duckduckgo.com/html/"
+	ddgDJSEndpoint    = "https://links.duckduckgo.com/d.js"
+	ddgHomepage       = "https://duckduckgo.com/"
 	directResultScore = 1.0
 )
 
@@ -23,6 +23,13 @@ var vqdPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`vqd='([^']+)'`),
 	regexp.MustCompile(`vqd="([^"]+)"`),
 	regexp.MustCompile(`vqd=([a-zA-Z0-9_-]+)`),
+}
+
+// DDGHTMLURL returns the GET URL for the DuckDuckGo HTML SERP endpoint.
+// P2 feeds this URL to ox-browser /fetch so the SERP request shape stays
+// single-owned in websearch (ADR-8: const host + url.QueryEscape only).
+func DDGHTMLURL(query string) string {
+	return ddgHTMLEndpoint + "?q=" + url.QueryEscape(query)
 }
 
 // DDG searches DuckDuckGo using HTML lite + d.js fallback.
