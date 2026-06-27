@@ -1,6 +1,7 @@
 package search
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -128,7 +129,7 @@ func TestCollectResults_Outcomes(t *testing.T) {
 			close(ch)
 
 			noopCancel := func() {}
-			got := collectResults(ch, m, 1000, noopCancel, nil)
+			got := collectResults(ch, m, 1000, noopCancel, nil, nil)
 
 			snap := m.Snapshot()
 
@@ -186,7 +187,7 @@ func TestCollectResults_CaptchaOutcome(t *testing.T) {
 		ch <- directResult{label: "ddg", err: &ErrRateLimited{Engine: "ddg"}}
 		close(ch)
 
-		got := collectResults(ch, m, 1000, func() {}, bc)
+		got := collectResults(ch, m, 1000, func() {}, bc, nil)
 
 		snap := m.Snapshot()
 		if sumOutcome(snap, "captcha") != 1 {
@@ -210,7 +211,7 @@ func TestCollectResults_CaptchaOutcome(t *testing.T) {
 		ch <- directResult{label: "brave", results: nil, err: nil}
 		close(ch)
 
-		got := collectResults(ch, m, 1000, func() {}, bc)
+		got := collectResults(ch, m, 1000, func() {}, bc, nil)
 
 		snap := m.Snapshot()
 		if sumOutcome(snap, "empty") != 1 {
@@ -239,7 +240,7 @@ func TestCollectResults_CaptchaOutcome(t *testing.T) {
 			}
 		}()
 
-		got := collectResults(ch, m, 1000, func() {}, nil)
+		got := collectResults(ch, m, 1000, func() {}, nil, nil)
 
 		snap := m.Snapshot()
 		if sumOutcome(snap, "captcha") != 1 {
@@ -247,6 +248,137 @@ func TestCollectResults_CaptchaOutcome(t *testing.T) {
 		}
 		if len(got) != 0 {
 			t.Errorf("result count: got %d, want 0", len(got))
+		}
+	})
+}
+
+// TestCollectResults_TimeoutOutcome verifies that collectResults classifies
+// per-source transport-timeouts (context.DeadlineExceeded) as outcome="timeout"
+// and marks the engine in BlockCache — but ONLY for engines in the OxEscalate
+// allowlist. This drives the ox-browser escalation tier in runOxEscalation.
+//
+// RED-ON-REVERT contracts:
+//
+//	(a) allowlisted DDG timeout → outcome=timeout + Marked:
+//	    remove the errors.Is(DeadlineExceeded) branch → falls to fail, wantTimeout==1
+//	    fails (got 0); bc.IsBlocked("ddg") == false → Marked assertion fails.
+//	(b) non-allowlisted engine timeout → outcome=fail, NOT Marked:
+//	    add non-allowlisted source to oxEscalate → outcome becomes timeout; test fails.
+//	(c) context.Canceled (parent cancel) → outcome=fail, NOT Marked:
+//	    change condition to also match Canceled → wantFail==1 fails (got 0),
+//	    wantTimeout==0 fails (got 1).
+//	(d) OxEscalate nil/empty → timeout never Marked (dormant byte-identical):
+//	    initialise oxEscalate with ["ddg"] → bc.IsBlocked("ddg")==true; test fails.
+//	(e) captcha branch still Marks with oxEscalate set:
+//	    remove captcha Mark call → bc.IsBlocked("ddg")==false; sub-test fails.
+func TestCollectResults_TimeoutOutcome(t *testing.T) {
+	t.Run("(a) allowlisted engine DeadlineExceeded → outcome=timeout + host Marked", func(t *testing.T) {
+		m := metrics.New()
+		bc := fetch.NewDirectBlockCache(0, 0)
+		ch := make(chan directResult, 1)
+		ch <- directResult{label: "ddg", err: context.DeadlineExceeded}
+		close(ch)
+
+		got := collectResults(ch, m, 1000, func() {}, bc, []string{"ddg", "brave"})
+
+		snap := m.Snapshot()
+		if sumOutcome(snap, "timeout") != 1 {
+			t.Errorf("outcome=timeout: got %v, want 1 (snapshot: %v)", sumOutcome(snap, "timeout"), snap)
+		}
+		if sumOutcome(snap, "fail") != 0 {
+			t.Errorf("outcome=fail: got %v, want 0 (DeadlineExceeded+allowlist must be timeout; snapshot: %v)", sumOutcome(snap, "fail"), snap)
+		}
+		if !bc.IsBlocked("ddg") {
+			t.Error("ddg must be Marked in BlockCache after transport-timeout so runOxEscalation escalates it")
+		}
+		if len(got) != 0 {
+			t.Errorf("result count: got %d, want 0", len(got))
+		}
+	})
+
+	t.Run("(b) non-allowlisted engine DeadlineExceeded → outcome=fail NOT Marked", func(t *testing.T) {
+		m := metrics.New()
+		bc := fetch.NewDirectBlockCache(0, 0)
+		ch := make(chan directResult, 1)
+		// "yep" is not in the allowlist ["ddg", "brave"] → must not be escalated
+		ch <- directResult{label: "yep", err: context.DeadlineExceeded}
+		close(ch)
+
+		_ = collectResults(ch, m, 1000, func() {}, bc, []string{"ddg", "brave"})
+
+		snap := m.Snapshot()
+		if sumOutcome(snap, "fail") != 1 {
+			t.Errorf("outcome=fail: got %v, want 1 (non-allowlisted timeout must stay fail; snapshot: %v)", sumOutcome(snap, "fail"), snap)
+		}
+		if sumOutcome(snap, "timeout") != 0 {
+			t.Errorf("outcome=timeout: got %v, want 0 (non-allowlisted engine must not be classified as timeout; snapshot: %v)", sumOutcome(snap, "timeout"), snap)
+		}
+		if bc.IsBlocked("yep") {
+			t.Error("yep must NOT be Marked in BlockCache: non-allowlisted timeout must not trigger escalation")
+		}
+	})
+
+	t.Run("(c) context.Canceled (parent early-return) → outcome=fail NOT Marked", func(t *testing.T) {
+		m := metrics.New()
+		bc := fetch.NewDirectBlockCache(0, 0)
+		ch := make(chan directResult, 1)
+		// context.Canceled is a parent-cancel (early-return), not a per-source deadline.
+		// Must NOT be treated as a transport-timeout even for allowlisted engines.
+		ch <- directResult{label: "ddg", err: context.Canceled}
+		close(ch)
+
+		_ = collectResults(ch, m, 1000, func() {}, bc, []string{"ddg", "brave"})
+
+		snap := m.Snapshot()
+		if sumOutcome(snap, "fail") != 1 {
+			t.Errorf("outcome=fail: got %v, want 1 (Canceled must be fail, not timeout; snapshot: %v)", sumOutcome(snap, "fail"), snap)
+		}
+		if sumOutcome(snap, "timeout") != 0 {
+			t.Errorf("outcome=timeout: got %v, want 0 (Canceled must not become timeout; snapshot: %v)", sumOutcome(snap, "timeout"), snap)
+		}
+		if bc.IsBlocked("ddg") {
+			t.Error("ddg must NOT be Marked: context.Canceled is not a block signal")
+		}
+	})
+
+	t.Run("(d) OxEscalate nil → timeout never Marked (dormant byte-identical)", func(t *testing.T) {
+		m := metrics.New()
+		bc := fetch.NewDirectBlockCache(0, 0)
+		ch := make(chan directResult, 1)
+		ch <- directResult{label: "ddg", err: context.DeadlineExceeded}
+		close(ch)
+
+		// nil oxEscalate: no engine is ever in the allowlist → must behave identically
+		// to pre-P2 (timeout stays outcome=fail, nothing marked).
+		_ = collectResults(ch, m, 1000, func() {}, bc, nil)
+
+		if bc.IsBlocked("ddg") {
+			t.Error("ddg must NOT be Marked when OxEscalate is nil (dormant-byte-identical invariant)")
+		}
+		snap := m.Snapshot()
+		if sumOutcome(snap, "timeout") != 0 {
+			t.Errorf("outcome=timeout: got %v, want 0 when OxEscalate nil (snapshot: %v)", sumOutcome(snap, "timeout"), snap)
+		}
+	})
+
+	t.Run("(e) captcha branch still Marks + outcome=captcha with oxEscalate set", func(t *testing.T) {
+		m := metrics.New()
+		bc := fetch.NewDirectBlockCache(0, 0)
+		ch := make(chan directResult, 1)
+		ch <- directResult{label: "ddg", err: &ErrRateLimited{Engine: "ddg"}}
+		close(ch)
+
+		_ = collectResults(ch, m, 1000, func() {}, bc, []string{"ddg", "brave"})
+
+		snap := m.Snapshot()
+		if sumOutcome(snap, "captcha") != 1 {
+			t.Errorf("outcome=captcha: got %v, want 1 (captcha branch must be unaffected by oxEscalate param; snapshot: %v)", sumOutcome(snap, "captcha"), snap)
+		}
+		if sumOutcome(snap, "timeout") != 0 {
+			t.Errorf("outcome=timeout: got %v, want 0 (ErrRateLimited must not be reclassified as timeout; snapshot: %v)", sumOutcome(snap, "timeout"), snap)
+		}
+		if !bc.IsBlocked("ddg") {
+			t.Error("ddg must be Marked in BlockCache: captcha branch unchanged by new oxEscalate param")
 		}
 	})
 }

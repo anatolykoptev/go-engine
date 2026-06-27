@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"slices"
 	"sync"
 	"time"
 
@@ -169,10 +170,13 @@ func runSourceWithTimeout(srcCtx context.Context, label string, fn func(context.
 // surfaces it as go_search_source_result_total{source="yep",outcome="fail"}.
 //
 // Outcomes:
-//   - ok    — source returned ≥1 result
-//   - empty — source returned HTTP 200 with zero results (silent-block signature:
+//   - ok      — source returned ≥1 result
+//   - empty   — source returned HTTP 200 with zero results (silent-block signature:
 //     e.g. mojeek 403 masquerading as empty, geo-blocked source)
-//   - fail  — source returned an error
+//   - captcha — source returned *ErrRateLimited (anti-bot block); engine marked in BlockCache
+//   - timeout — per-source context.DeadlineExceeded for an OxEscalate-allowlisted engine;
+//     engine marked in BlockCache so runOxEscalation promotes it to stealth-render tier
+//   - fail    — source returned any other error
 //
 // Rationale: a source failing 100% (e.g. yep on the deprecated endpoint) was
 // invisible because a sibling source (yandex) silently covered the result set.
@@ -308,13 +312,51 @@ func SearchDirect(ctx context.Context, cfg DirectConfig, query, language string)
 		close(ch)
 	}()
 
-	merged := collectResults(ch, cfg.Metrics, earlyAt, allDoneCancel, cfg.BlockCache)
+	merged := collectResults(ch, cfg.Metrics, earlyAt, allDoneCancel, cfg.BlockCache, cfg.OxEscalate)
 	// Post-fan-out ox-browser captcha-escalation tier.
 	// Dormant unless OxBrowserFetch, OxEscalate, and BlockCache are all set.
 	if ox := runOxEscalation(ctx, cfg, query, len(merged), earlyAt); len(ox) > 0 {
 		merged = append(merged, ox...)
 	}
 	return merged
+}
+
+// handleSourceError classifies a non-nil source error, records the outcome metric,
+// logs a warning, and marks the engine in blockCache when appropriate.
+//
+// Classification (evaluated in order):
+//   - *ErrRateLimited        → outcome="captcha"; always Marks when blockCache != nil.
+//   - context.DeadlineExceeded AND label in oxEscalate → outcome="timeout"; Marks.
+//     context.Canceled (parent early-return) does NOT match DeadlineExceeded, so
+//     user-triggered cancellation is never treated as a transport block.
+//   - anything else          → outcome="fail"; never Marks.
+//
+// The allowlist guard ensures only OxEscalate-configured engines ({ddg, brave}) are
+// marked on timeout; a random slow source must not trigger a 30s Chromium render.
+func handleSourceError(r directResult, m *metrics.Registry, blockCache *fetch.DirectBlockCache, oxEscalate []string) {
+	var rl *ErrRateLimited
+	switch {
+	case errors.As(r.err, &rl):
+		recordSourceResult(m, r.label, "captcha")
+		slog.Warn("search source captcha/rate-limited",
+			slog.String("source", r.label),
+			slog.String("engine", rl.Engine),
+		)
+		if blockCache != nil {
+			blockCache.Mark(r.label)
+		}
+	case errors.Is(r.err, context.DeadlineExceeded) && slices.Contains(oxEscalate, r.label):
+		recordSourceResult(m, r.label, "timeout")
+		slog.Warn("search source transport-timeout; scheduling ox escalation",
+			slog.String("source", r.label),
+		)
+		if blockCache != nil {
+			blockCache.Mark(r.label)
+		}
+	default:
+		recordSourceResult(m, r.label, "fail")
+		slog.Warn("search source failed", slog.String("source", r.label), slog.Any("error", r.err))
+	}
 }
 
 // collectResults drains ch and accumulates results, emitting metrics and triggering
@@ -325,7 +367,16 @@ func SearchDirect(ctx context.Context, cfg DirectConfig, query, language string)
 // than "fail", and blockCache.Mark is called if blockCache is non-nil. This keeps
 // legit-empty (nil error, zero results → "empty") semantically distinct from
 // blocked-engine ("captcha") — result-count is never used as the captcha signal.
-func collectResults(ch <-chan directResult, m *metrics.Registry, earlyAt int, cancel context.CancelFunc, blockCache *fetch.DirectBlockCache) []sources.Result {
+//
+// timeout outcome: when a source's error is context.DeadlineExceeded (per-source
+// deadline fired — NOT context.Canceled which is a parent early-return) AND the
+// source label is present in oxEscalate, the outcome is "timeout" and
+// blockCache.Mark is called so runOxEscalation will escalate to stealth-render.
+// A timeout from a NON-allowlisted source stays outcome="fail" and is NOT marked
+// — over-escalation guard: a random slow source must not trigger an expensive
+// Chromium render. When oxEscalate is nil/empty no timeout is ever marked
+// (dormant-byte-identical with the pre-P2 path).
+func collectResults(ch <-chan directResult, m *metrics.Registry, earlyAt int, cancel context.CancelFunc, blockCache *fetch.DirectBlockCache, oxEscalate []string) []sources.Result {
 	var all []sources.Result
 	var cancelled bool
 	for r := range ch {
@@ -336,20 +387,7 @@ func collectResults(ch <-chan directResult, m *metrics.Registry, earlyAt int, ca
 			)
 		}
 		if r.err != nil {
-			var rl *ErrRateLimited
-			if errors.As(r.err, &rl) {
-				recordSourceResult(m, r.label, "captcha")
-				slog.Warn("search source captcha/rate-limited",
-					slog.String("source", r.label),
-					slog.String("engine", rl.Engine),
-				)
-				if blockCache != nil {
-					blockCache.Mark(r.label)
-				}
-			} else {
-				recordSourceResult(m, r.label, "fail")
-				slog.Warn("search source failed", slog.String("source", r.label), slog.Any("error", r.err))
-			}
+			handleSourceError(r, m, blockCache, oxEscalate)
 			continue
 		}
 		if len(r.results) == 0 {
