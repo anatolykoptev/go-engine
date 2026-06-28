@@ -126,7 +126,7 @@ func TestSearchDirect_PacerFirstHitPassesThrough(t *testing.T) {
 		DDG:     true,
 		Pacer:   pacer,
 	}
-	results := SearchDirect(context.Background(), cfg, "test query", "en")
+	results, _ := SearchDirect(context.Background(), cfg, "test query", "en")
 	if len(results) == 0 {
 		t.Fatal("got no results; pacer must not block the first hit per engine")
 	}
@@ -161,7 +161,7 @@ func TestSearchDirect_PacerCtxCancelSkipsEngine(t *testing.T) {
 	defer cancel()
 
 	start := time.Now()
-	_ = SearchDirect(ctx, cfg, "test query", "en")
+	_, _ = SearchDirect(ctx, cfg, "test query", "en")
 	elapsed := time.Since(start)
 
 	if elapsed > time.Second {

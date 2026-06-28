@@ -431,7 +431,7 @@ func TestSearchDirect_BothEnabled(t *testing.T) {
 		Retry:     defaultTestRetry(),
 	}
 
-	results := SearchDirect(context.Background(), cfg, "test", "en")
+	results, _ := SearchDirect(context.Background(), cfg, "test", "en")
 	if len(results) < 2 {
 		t.Errorf("got %d results, want at least 2 (from DDG + Startpage)", len(results))
 	}
@@ -442,7 +442,7 @@ func TestSearchDirect_NilBrowser(t *testing.T) {
 		Browser: nil,
 		DDG:     true,
 	}
-	results := SearchDirect(context.Background(), cfg, "test", "en")
+	results, _ := SearchDirect(context.Background(), cfg, "test", "en")
 	if results != nil {
 		t.Error("expected nil results when browser is nil")
 	}
@@ -478,7 +478,7 @@ func TestSearchDirect_RateLimiter(t *testing.T) {
 		DDGLimiter: rate.NewLimiter(1000, 100),
 	}
 
-	results := SearchDirect(context.Background(), cfg, "test", "en")
+	results, _ := SearchDirect(context.Background(), cfg, "test", "en")
 	if len(results) == 0 {
 		t.Error("expected results with a permissive rate limiter, got none")
 	}
@@ -503,7 +503,7 @@ func TestSearchDirect_RateLimiterCancelled(t *testing.T) {
 		DDGLimiter: lim,
 	}
 
-	results := SearchDirect(ctx, cfg, "test", "en")
+	results, _ := SearchDirect(ctx, cfg, "test", "en")
 	if len(results) != 0 {
 		t.Errorf("expected 0 results when rate limiter blocks and context cancels, got %d", len(results))
 	}

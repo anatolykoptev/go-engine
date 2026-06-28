@@ -86,7 +86,7 @@ func TestSearchDirect_SlowSourceDoesNotDelay(t *testing.T) {
 	}
 
 	start := time.Now()
-	results := SearchDirect(context.Background(), cfg, "test", "en")
+	results, _ := SearchDirect(context.Background(), cfg, "test", "en")
 	elapsed := time.Since(start)
 
 	if elapsed >= 1*time.Second {
@@ -138,7 +138,7 @@ func TestSearchDirect_EarlyReturnOnEnoughResults(t *testing.T) {
 	}
 
 	start := time.Now()
-	results := SearchDirect(context.Background(), cfg, "test", "en")
+	results, _ := SearchDirect(context.Background(), cfg, "test", "en")
 	elapsed := time.Since(start)
 
 	if elapsed >= 500*time.Millisecond {
@@ -184,7 +184,7 @@ func TestSearchDirect_FastResultsNotDiscarded(t *testing.T) {
 		PerSourceTimeout: 200 * time.Millisecond,
 	}
 
-	results := SearchDirect(context.Background(), cfg, "test", "en")
+	results, _ := SearchDirect(context.Background(), cfg, "test", "en")
 	if len(results) < 5 {
 		t.Errorf("got %d results, want >= 5; fast DDG results were discarded", len(results))
 	}
@@ -240,7 +240,7 @@ func TestSearchDirect_ParentDeadlineDoesNotMarkBlockCache(t *testing.T) {
 		OxEscalate:       []string{"ddg", "brave"},
 	}
 
-	_ = SearchDirect(parentCtx, cfg, "test", "en")
+	_, _ = SearchDirect(parentCtx, cfg, "test", "en")
 
 	if bc.IsBlocked("ddg") {
 		t.Error("ddg must NOT be Marked: parent deadline must not trigger escalation")
@@ -291,7 +291,7 @@ func TestSearchDirect_PerSourceTimeoutMarksBlockCache(t *testing.T) {
 		OxEscalate:       []string{"ddg", "brave"},
 	}
 
-	_ = SearchDirect(context.Background(), cfg, "test", "en")
+	_, _ = SearchDirect(context.Background(), cfg, "test", "en")
 
 	if !bc.IsBlocked("ddg") {
 		t.Error("ddg must be Marked: genuine per-source timeout must trigger escalation")

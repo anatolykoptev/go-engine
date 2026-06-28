@@ -161,6 +161,26 @@ type directJob struct {
 	fn      func(context.Context) ([]sources.Result, error)
 }
 
+// DirectStats summarises the per-leg outcome of a SearchDirect fan-out.
+//
+// The primary caller signal: Attempted > 0 && OK == 0 means every launched leg
+// was blocked or failed — the DC-IP / censorship degraded mode that was previously
+// indistinguishable from genuine zero results at the call site.
+//
+// Accounting:
+//   - Attempted = legs that reached the channel (launched goroutines that completed
+//     or timed out). IsBlocked-skipped legs are NOT counted here.
+//   - OK        = legs that returned ≥1 result.
+//   - Empty     = legs that returned 0 results without error (silent-block signature).
+//   - Failed    = legs that returned any error (captcha / timeout / blocked / network).
+//   - Invariant: Attempted == OK + Empty + Failed.
+type DirectStats struct {
+	Attempted int
+	OK        int
+	Empty     int
+	Failed    int
+}
+
 // runSourceWithTimeout executes fn inside a goroutine that is capped by srcCtx.
 // It sends the result to ch once fn completes or srcCtx is cancelled (whichever
 // comes first), so a blocked BrowserDoer.Do call cannot exceed the timeout.
@@ -262,11 +282,14 @@ func recordOxEscalation(m *metrics.Registry, engine, outcome string) {
 }
 
 // SearchDirect queries enabled direct scrapers in parallel.
-// Returns merged results from all direct sources. Failures are non-fatal.
-func SearchDirect(ctx context.Context, cfg DirectConfig, query, language string) []sources.Result {
+// Returns merged results and per-leg outcome stats. Failures are non-fatal.
+// DirectStats.Attempted > 0 && DirectStats.OK == 0 signals that every enabled
+// leg was blocked or failed (DC-IP block, censorship degraded mode), which is
+// otherwise indistinguishable from a genuine zero-result fan-out.
+func SearchDirect(ctx context.Context, cfg DirectConfig, query, language string) ([]sources.Result, DirectStats) {
 	if cfg.Browser == nil {
 		slog.Info("search direct: browser nil, skipping all scrapers")
-		return nil
+		return nil, DirectStats{}
 	}
 	slog.Info("search direct: starting",
 		slog.Bool("ddg", cfg.DDG),
@@ -332,7 +355,7 @@ func SearchDirect(ctx context.Context, cfg DirectConfig, query, language string)
 		}
 	}
 	if enabled == 0 {
-		return nil
+		return nil, DirectStats{}
 	}
 
 	ch := make(chan directResult, enabled)
@@ -364,13 +387,15 @@ func SearchDirect(ctx context.Context, cfg DirectConfig, query, language string)
 		close(ch)
 	}()
 
-	merged := collectResults(ch, cfg.Metrics, earlyAt, allDoneCancel, cfg.BlockCache, cfg.OxEscalate)
+	merged, stats := collectResults(ch, cfg.Metrics, earlyAt, allDoneCancel, cfg.BlockCache, cfg.OxEscalate)
 	// Post-fan-out ox-browser captcha-escalation tier.
 	// Dormant unless OxBrowserFetch, OxEscalate, and BlockCache are all set.
+	// Ox results are NOT counted in DirectStats — they are a secondary tier, not
+	// primary direct legs; stats reflects only the initial fan-out.
 	if ox := runOxEscalation(ctx, cfg, query, len(merged), earlyAt); len(ox) > 0 {
 		merged = append(merged, ox...)
 	}
-	return merged
+	return merged, stats
 }
 
 // handleSourceError classifies a non-nil source error, records the outcome metric,
@@ -451,10 +476,12 @@ func handleSourceError(r directResult, m *metrics.Registry, blockCache *fetch.Di
 // escalation semantics to timeout. This closes the detection gap where d.js
 // challenges were silently swallowed as outcome="fail" without ever triggering the
 // stealth-render tier.
-func collectResults(ch <-chan directResult, m *metrics.Registry, earlyAt int, cancel context.CancelFunc, blockCache *fetch.DirectBlockCache, oxEscalate []string) []sources.Result {
+func collectResults(ch <-chan directResult, m *metrics.Registry, earlyAt int, cancel context.CancelFunc, blockCache *fetch.DirectBlockCache, oxEscalate []string) ([]sources.Result, DirectStats) {
 	var all []sources.Result
+	var stats DirectStats
 	var cancelled bool
 	for r := range ch {
+		stats.Attempted++
 		if m != nil {
 			m.ObserveSeconds(
 				kitmetrics.Label("go_search_search_source_duration_seconds", "source", r.label),
@@ -462,14 +489,17 @@ func collectResults(ch <-chan directResult, m *metrics.Registry, earlyAt int, ca
 			)
 		}
 		if r.err != nil {
+			stats.Failed++
 			handleSourceError(r, m, blockCache, oxEscalate)
 			continue
 		}
 		if len(r.results) == 0 {
+			stats.Empty++
 			recordSourceResult(m, r.label, "empty")
 			slog.Info("search source empty", slog.String("source", r.label))
 			continue
 		}
+		stats.OK++
 		recordSourceResult(m, r.label, "ok")
 		slog.Info("search source results", slog.String("source", r.label), slog.Int("count", len(r.results)))
 		all = append(all, r.results...)
@@ -478,5 +508,5 @@ func collectResults(ch <-chan directResult, m *metrics.Registry, earlyAt int, ca
 			cancelled = true
 		}
 	}
-	return all
+	return all, stats
 }
