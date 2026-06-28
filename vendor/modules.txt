@@ -22,7 +22,7 @@ github.com/RadhiFadlillah/whatlanggo
 ## explicit; go 1.26
 github.com/anatolykoptev/go-kit/llm
 github.com/anatolykoptev/go-kit/metrics
-# github.com/anatolykoptev/go-stealth v1.15.0
+# github.com/anatolykoptev/go-stealth v1.17.0
 ## explicit; go 1.26
 github.com/anatolykoptev/go-stealth
 github.com/anatolykoptev/go-stealth/proxypool

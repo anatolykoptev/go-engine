@@ -12,6 +12,7 @@ import (
 	"golang.org/x/time/rate"
 
 	kitmetrics "github.com/anatolykoptev/go-kit/metrics"
+	"github.com/anatolykoptev/go-stealth/ratelimit"
 
 	"github.com/anatolykoptev/go-engine/fetch"
 	"github.com/anatolykoptev/go-engine/metrics"
@@ -130,6 +131,19 @@ type DirectConfig struct {
 	// independent deadline, so a hung render (e.g. DDG anti-bot stall ~20 s) cannot
 	// block a fast one (Brave ~1.5 s). Default defaultOxRenderDeadline (8 s) when zero.
 	OxRenderDeadline time.Duration
+
+	// Pacer, when non-nil, applies proactive per-engine human-like spacing before
+	// each direct scraper issues its outbound HTTP request. Keyed by engine label
+	// so different engines in the parallel fan-out are not serialized — only
+	// repeated requests to the SAME engine within a burst (e.g. go-job's
+	// multi-query sweep) are spaced.
+	//
+	// The first request for any key is always immediate (KeyedPacer first-hit
+	// semantics), so a single-query fan-out (one hit per engine) incurs zero delay.
+	//
+	// Use NewScraperPacer to construct a pacer from SCRAPER_PACE_MIN_MS /
+	// SCRAPER_PACE_JITTER_MS environment variables. Nil disables pacing entirely.
+	Pacer *ratelimit.KeyedPacer
 }
 
 // directResult holds the outcome of one source goroutine.
@@ -308,6 +322,8 @@ func SearchDirect(ctx context.Context, cfg DirectConfig, query, language string)
 			return runMojeek(ctx, cfg, query)
 		}},
 	}
+
+	applyPacing(jobs, cfg.Pacer)
 
 	enabled := 0
 	for _, j := range jobs {
