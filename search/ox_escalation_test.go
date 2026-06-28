@@ -440,7 +440,7 @@ func TestSearchDirect_IsBlockedSkipsDirect(t *testing.T) {
 	_ = braveBrowser
 
 	// Call SearchDirect: DDG should be skipped (IsBlocked), Brave runs normally.
-	results := SearchDirect(context.Background(), cfg, "test", "")
+	results, _ := SearchDirect(context.Background(), cfg, "test", "")
 	_ = results
 
 	// blockedBrowser is cfg.Browser — shared by ALL sources. Brave also calls it.

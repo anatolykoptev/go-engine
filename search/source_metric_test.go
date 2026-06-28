@@ -129,7 +129,7 @@ func TestCollectResults_Outcomes(t *testing.T) {
 			close(ch)
 
 			noopCancel := func() {}
-			got := collectResults(ch, m, 1000, noopCancel, nil, nil)
+			got, _ := collectResults(ch, m, 1000, noopCancel, nil, nil)
 
 			snap := m.Snapshot()
 
@@ -187,7 +187,7 @@ func TestCollectResults_CaptchaOutcome(t *testing.T) {
 		ch <- directResult{label: "ddg", err: &ErrRateLimited{Engine: "ddg"}}
 		close(ch)
 
-		got := collectResults(ch, m, 1000, func() {}, bc, nil)
+		got, _ := collectResults(ch, m, 1000, func() {}, bc, nil)
 
 		snap := m.Snapshot()
 		if sumOutcome(snap, "captcha") != 1 {
@@ -211,7 +211,7 @@ func TestCollectResults_CaptchaOutcome(t *testing.T) {
 		ch <- directResult{label: "brave", results: nil, err: nil}
 		close(ch)
 
-		got := collectResults(ch, m, 1000, func() {}, bc, nil)
+		got, _ := collectResults(ch, m, 1000, func() {}, bc, nil)
 
 		snap := m.Snapshot()
 		if sumOutcome(snap, "empty") != 1 {
@@ -240,7 +240,7 @@ func TestCollectResults_CaptchaOutcome(t *testing.T) {
 			}
 		}()
 
-		got := collectResults(ch, m, 1000, func() {}, nil, nil)
+		got, _ := collectResults(ch, m, 1000, func() {}, nil, nil)
 
 		snap := m.Snapshot()
 		if sumOutcome(snap, "captcha") != 1 {
@@ -287,7 +287,7 @@ func TestCollectResults_TimeoutOutcome(t *testing.T) {
 		ch <- directResult{label: "ddg", err: errPerSourceTimeout}
 		close(ch)
 
-		got := collectResults(ch, m, 1000, func() {}, bc, []string{"ddg", "brave"})
+		got, _ := collectResults(ch, m, 1000, func() {}, bc, []string{"ddg", "brave"})
 
 		snap := m.Snapshot()
 		if sumOutcome(snap, "timeout") != 1 {
@@ -312,7 +312,7 @@ func TestCollectResults_TimeoutOutcome(t *testing.T) {
 		ch <- directResult{label: "yep", err: context.DeadlineExceeded}
 		close(ch)
 
-		_ = collectResults(ch, m, 1000, func() {}, bc, []string{"ddg", "brave"})
+		_, _ = collectResults(ch, m, 1000, func() {}, bc, []string{"ddg", "brave"})
 
 		snap := m.Snapshot()
 		if sumOutcome(snap, "fail") != 1 {
@@ -335,7 +335,7 @@ func TestCollectResults_TimeoutOutcome(t *testing.T) {
 		ch <- directResult{label: "ddg", err: context.Canceled}
 		close(ch)
 
-		_ = collectResults(ch, m, 1000, func() {}, bc, []string{"ddg", "brave"})
+		_, _ = collectResults(ch, m, 1000, func() {}, bc, []string{"ddg", "brave"})
 
 		snap := m.Snapshot()
 		if sumOutcome(snap, "fail") != 1 {
@@ -358,7 +358,7 @@ func TestCollectResults_TimeoutOutcome(t *testing.T) {
 
 		// nil oxEscalate: no engine is ever in the allowlist → must behave identically
 		// to pre-P2 (timeout stays outcome=fail, nothing marked).
-		_ = collectResults(ch, m, 1000, func() {}, bc, nil)
+		_, _ = collectResults(ch, m, 1000, func() {}, bc, nil)
 
 		if bc.IsBlocked("ddg") {
 			t.Error("ddg must NOT be Marked when OxEscalate is nil (dormant-byte-identical invariant)")
@@ -376,7 +376,7 @@ func TestCollectResults_TimeoutOutcome(t *testing.T) {
 		ch <- directResult{label: "ddg", err: &ErrRateLimited{Engine: "ddg"}}
 		close(ch)
 
-		_ = collectResults(ch, m, 1000, func() {}, bc, []string{"ddg", "brave"})
+		_, _ = collectResults(ch, m, 1000, func() {}, bc, []string{"ddg", "brave"})
 
 		snap := m.Snapshot()
 		if sumOutcome(snap, "captcha") != 1 {
@@ -408,7 +408,7 @@ func TestCollectResults_TimeoutOutcome(t *testing.T) {
 		ch <- directResult{label: "ddg", err: context.DeadlineExceeded}
 		close(ch)
 
-		_ = collectResults(ch, m, 1000, func() {}, bc, []string{"ddg", "brave"})
+		_, _ = collectResults(ch, m, 1000, func() {}, bc, []string{"ddg", "brave"})
 
 		snap := m.Snapshot()
 		if sumOutcome(snap, "timeout") != 0 {
@@ -462,7 +462,7 @@ func TestCollectResults_BlockedOutcome(t *testing.T) {
 		ch <- directResult{label: "ddg", err: parseErr}
 		close(ch)
 
-		got := collectResults(ch, m, 1000, func() {}, bc, []string{"ddg", "brave"})
+		got, _ := collectResults(ch, m, 1000, func() {}, bc, []string{"ddg", "brave"})
 
 		snap := m.Snapshot()
 		if sumOutcome(snap, "blocked") != 1 {
@@ -486,7 +486,7 @@ func TestCollectResults_BlockedOutcome(t *testing.T) {
 		ch <- directResult{label: "yep", err: parseErr}
 		close(ch)
 
-		_ = collectResults(ch, m, 1000, func() {}, bc, []string{"ddg", "brave"})
+		_, _ = collectResults(ch, m, 1000, func() {}, bc, []string{"ddg", "brave"})
 
 		snap := m.Snapshot()
 		if sumOutcome(snap, "fail") != 1 {
@@ -507,7 +507,7 @@ func TestCollectResults_BlockedOutcome(t *testing.T) {
 		ch <- directResult{label: "ddg", err: context.Canceled}
 		close(ch)
 
-		_ = collectResults(ch, m, 1000, func() {}, bc, []string{"ddg", "brave"})
+		_, _ = collectResults(ch, m, 1000, func() {}, bc, []string{"ddg", "brave"})
 
 		snap := m.Snapshot()
 		if sumOutcome(snap, "fail") != 1 {
@@ -529,7 +529,7 @@ func TestCollectResults_BlockedOutcome(t *testing.T) {
 		ch <- directResult{label: "ddg", results: nil, err: nil}
 		close(ch)
 
-		got := collectResults(ch, m, 1000, func() {}, bc, []string{"ddg", "brave"})
+		got, _ := collectResults(ch, m, 1000, func() {}, bc, []string{"ddg", "brave"})
 
 		snap := m.Snapshot()
 		if sumOutcome(snap, "empty") != 1 {
@@ -553,7 +553,7 @@ func TestCollectResults_BlockedOutcome(t *testing.T) {
 		ch <- directResult{label: "ddg", err: parseErr}
 		close(ch)
 
-		_ = collectResults(ch, m, 1000, func() {}, bc, nil)
+		_, _ = collectResults(ch, m, 1000, func() {}, bc, nil)
 
 		snap := m.Snapshot()
 		if sumOutcome(snap, "blocked") != 0 {
