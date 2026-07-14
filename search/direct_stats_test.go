@@ -50,7 +50,7 @@ func TestSearchDirect_Stats_AllBlocked(t *testing.T) {
 		t.Errorf("Empty = %d, want 0 (no empty-healthy legs)", stats.Empty)
 	}
 	// Degraded signal: the key invariant callers check.
-	if !(stats.Attempted > 0 && stats.OK == 0) {
+	if stats.Attempted <= 0 || stats.OK != 0 {
 		t.Errorf("degraded signal not set: Attempted=%d OK=%d", stats.Attempted, stats.OK)
 	}
 }
@@ -132,7 +132,7 @@ func TestCollectResults_Stats_GenuineEmpty(t *testing.T) {
 		t.Errorf("Failed = %d, want 0 (no error legs)", stats.Failed)
 	}
 	// Degraded signal holds for the silent-empty case too.
-	if !(stats.Attempted > 0 && stats.OK == 0) {
+	if stats.Attempted <= 0 || stats.OK != 0 {
 		t.Errorf("degraded signal not set: Attempted=%d OK=%d", stats.Attempted, stats.OK)
 	}
 }

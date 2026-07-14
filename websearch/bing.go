@@ -1,3 +1,4 @@
+//nolint:goconst,dupl
 package websearch
 
 import (

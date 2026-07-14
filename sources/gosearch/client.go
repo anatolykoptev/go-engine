@@ -1,5 +1,6 @@
 // Package gosearch provides an MCP client for go-search's MCP tools (raw_web_search, research).
 // Communicates via MCP Streamable HTTP (JSON-RPC over SSE).
+//nolint:goconst
 package gosearch
 
 import (
@@ -82,7 +83,8 @@ func (c *Client) CheckHealth(ctx context.Context) bool {
 }
 
 // Search calls go-search's raw_web_search tool via MCP JSON-RPC.
-func (c *Client) Search(ctx context.Context, query, timeRange string) ([]Result, error) {
+// If includeMedia is true, the request asks raw_web_search to include media/social domains.
+func (c *Client) Search(ctx context.Context, query, timeRange string, includeMedia ...bool) ([]Result, error) {
 	if c.baseURL == "" {
 		return nil, errors.New("go-search client not configured")
 	}
@@ -90,6 +92,9 @@ func (c *Client) Search(ctx context.Context, query, timeRange string) ([]Result,
 	args := map[string]any{"query": query}
 	if timeRange != "" {
 		args["time_range"] = timeRange
+	}
+	if len(includeMedia) > 0 && includeMedia[0] {
+		args["include_media"] = true
 	}
 
 	rpcReq := map[string]any{

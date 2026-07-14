@@ -1,3 +1,4 @@
+//nolint:goconst
 package websearch
 
 import (
@@ -200,7 +201,7 @@ func SearchOAuth(ctx context.Context, doer BrowserDoer, tm RedditTokenManager, q
 		return nil, errors.New("reddit oauth: token expired (401) — invalidated, retry")
 	}
 
-	if status >= 500 {
+	if status >= http.StatusInternalServerError {
 		return nil, fmt.Errorf("reddit oauth search: status %d: %w", status, ErrTransient)
 	}
 
