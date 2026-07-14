@@ -85,6 +85,12 @@ type DirectConfig struct {
 	// Receives (ctx, query) and returns (results, error).
 	RedditCookieSearch func(ctx context.Context, query string) ([]sources.Result, error)
 
+	// TimeRange is an optional recency filter forwarded to the engines that
+	// support it (e.g. Bing freshness, DDG df, Brave tf, Startpage with_date,
+	// Reddit t, Mojeek since:, Yep start_crawl_date). Values match SearXNG:
+	// "day", "week", "month", "year".
+	TimeRange string
+
 	// RedditBrowserRender, when non-nil, enables Tier 3 browser-render search.
 	// Receives (ctx, query) and returns (results, error).
 	RedditBrowserRender func(ctx context.Context, query string) ([]sources.Result, error)
@@ -330,7 +336,7 @@ func SearchDirect(ctx context.Context, cfg DirectConfig, query, language string)
 		{cfg.Bing, "bing", func(ctx context.Context) ([]sources.Result, error) { return runBing(ctx, cfg, query) }},
 		{cfg.Yep, "yep", func(ctx context.Context) ([]sources.Result, error) {
 			y := websearch.NewYep(websearch.WithYepBrowser(cfg.Browser))
-			return y.Search(ctx, query, websearch.SearchOpts{})
+			return y.Search(ctx, query, websearch.SearchOpts{TimeRange: cfg.TimeRange})
 		}},
 		{cfg.Yandex.APIKey != "", "yandex", func(ctx context.Context) ([]sources.Result, error) {
 			return SearchYandexAPI(ctx, cfg.Yandex, query, "", cfg.Metrics)

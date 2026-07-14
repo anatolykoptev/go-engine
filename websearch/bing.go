@@ -35,8 +35,14 @@ func WithBingBrowser(bc BrowserDoer) BingOption {
 // BingSearchURL returns the GET URL for the Bing Search HTML SERP endpoint.
 // P2 feeds this URL to ox-browser /fetch so the SERP request shape stays
 // single-owned in websearch (ADR-8: const host + url.QueryEscape only).
-func BingSearchURL(query string) string {
-	return bingEndpoint + "?q=" + url.QueryEscape(query)
+func BingSearchURL(query string, opts ...SearchOpts) string {
+	u := bingEndpoint + "?q=" + url.QueryEscape(query)
+	if len(opts) > 0 {
+		if freshness := timeRangeToBing(opts[0].TimeRange); freshness != "" {
+			u += "&freshness=" + url.QueryEscape(freshness)
+		}
+	}
+	return u
 }
 
 // NewBing creates a Bing Search scraper. A BrowserDoer must be provided via WithBingBrowser.
@@ -57,7 +63,7 @@ func (b *Bing) Search(ctx context.Context, query string, opts SearchOpts) ([]Res
 		return nil, err
 	}
 
-	u := BingSearchURL(query)
+	u := BingSearchURL(query, opts)
 
 	headers := ChromeHeaders()
 	headers["referer"] = bingReferer

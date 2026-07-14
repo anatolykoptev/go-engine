@@ -21,8 +21,14 @@ const (
 // BraveSearchURL returns the GET URL for the Brave Search HTML SERP endpoint.
 // P2 feeds this URL to ox-browser /fetch so the SERP request shape stays
 // single-owned in websearch (ADR-8: const host + url.QueryEscape only).
-func BraveSearchURL(query string) string {
-	return braveEndpoint + "?q=" + url.QueryEscape(query) + "&source=web"
+func BraveSearchURL(query string, opts ...SearchOpts) string {
+	u := braveEndpoint + "?q=" + url.QueryEscape(query) + "&source=web"
+	if len(opts) > 0 {
+		if tf := timeRangeToBrave(opts[0].TimeRange); tf != "" {
+			u += "&tf=" + tf
+		}
+	}
+	return u
 }
 
 // Brave searches Brave Search via HTML scraping.
@@ -56,7 +62,7 @@ func (b *Brave) Search(ctx context.Context, query string, opts SearchOpts) ([]Re
 		return nil, err
 	}
 
-	u := BraveSearchURL(query)
+	u := BraveSearchURL(query, opts)
 
 	headers := ChromeHeaders()
 	headers["referer"] = braveReferer

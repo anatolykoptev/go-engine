@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"time"
 )
 
 const yepEndpoint = "https://api.yep.com/search"
@@ -49,6 +50,10 @@ func (y *Yep) Search(ctx context.Context, query string, opts SearchOpts) ([]Resu
 		"query":      {query},
 		"safeSearch": {"off"},
 		"type":       {"web"},
+	}
+	if start := timeRangeToYepStart(opts.TimeRange); start != "" {
+		args.Set("start_crawl_date", start)
+		args.Set("end_crawl_date", time.Now().UTC().Format(time.RFC3339))
 	}
 
 	u := yepEndpoint + "?" + args.Encode()
