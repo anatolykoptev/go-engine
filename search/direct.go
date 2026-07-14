@@ -340,12 +340,15 @@ func SearchDirect(ctx context.Context, cfg DirectConfig, query, language string)
 			return y.Search(ctx, query, websearch.SearchOpts{TimeRange: cfg.TimeRange})
 		}},
 		{cfg.Yandex.APIKey != "", "yandex", func(ctx context.Context) ([]sources.Result, error) {
-			return SearchYandexAPI(ctx, cfg.Yandex, query, "", cfg.Metrics)
+			return SearchYandexAPI(ctx, cfg.Yandex, query, "", cfg.TimeRange, cfg.Metrics)
 		}},
-		{cfg.Wikipedia, "wikipedia", func(ctx context.Context) ([]sources.Result, error) {
+		// Wikipedia and Marginalia do not support recency filtering, so skip them
+		// when a time_range is requested to avoid polluting the result set with old
+		// pages.
+		{cfg.Wikipedia && cfg.TimeRange == "", "wikipedia", func(ctx context.Context) ([]sources.Result, error) {
 			return runWikipedia(ctx, cfg, query, language)
 		}},
-		{cfg.Marginalia, "marginalia", func(ctx context.Context) ([]sources.Result, error) {
+		{cfg.Marginalia && cfg.TimeRange == "", "marginalia", func(ctx context.Context) ([]sources.Result, error) {
 			return runMarginalia(ctx, cfg, query)
 		}},
 		{cfg.Mojeek, "mojeek", func(ctx context.Context) ([]sources.Result, error) {
