@@ -49,8 +49,12 @@ func (r *Reddit) Search(ctx context.Context, query string, opts SearchOpts) ([]R
 		return nil, err
 	}
 
+	t := "all"
+	if rt := timeRangeToReddit(opts.TimeRange); rt != "" {
+		t = rt
+	}
 	u := redditEndpoint + "?q=" + url.QueryEscape(query) +
-		"&limit=10&sort=relevance&t=all"
+		"&limit=10&sort=relevance&t=" + t
 
 	headers := ChromeHeaders()
 	headers["accept"] = acceptJSON

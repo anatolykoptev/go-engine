@@ -28,7 +28,7 @@ func runDDG(ctx context.Context, cfg DirectConfig, query string) ([]sources.Resu
 		}
 	}
 	return fetch.RetryDo(ctx, cfg.Retry, func() ([]sources.Result, error) {
-		return SearchDDGDirect(ctx, cfg.Browser, query, "wt-wt", cfg.Metrics)
+		return SearchDDGDirect(ctx, cfg.Browser, query, "wt-wt", cfg.Metrics, cfg.TimeRange)
 	})
 }
 
@@ -41,7 +41,7 @@ func runStartpage(ctx context.Context, cfg DirectConfig, query, language string)
 		}
 	}
 	return fetch.RetryDo(ctx, cfg.Retry, func() ([]sources.Result, error) {
-		return SearchStartpageDirect(ctx, cfg.Browser, query, language, cfg.Metrics)
+		return SearchStartpageDirect(ctx, cfg.Browser, query, language, cfg.Metrics, cfg.TimeRange)
 	})
 }
 
@@ -54,7 +54,7 @@ func runBrave(ctx context.Context, cfg DirectConfig, query string) ([]sources.Re
 		}
 	}
 	return fetch.RetryDo(ctx, cfg.Retry, func() ([]sources.Result, error) {
-		return SearchBraveDirect(ctx, cfg.Browser, query, cfg.Metrics)
+		return SearchBraveDirect(ctx, cfg.Browser, query, cfg.Metrics, cfg.TimeRange)
 	})
 }
 
@@ -205,7 +205,7 @@ func runReddit(ctx context.Context, cfg DirectConfig, query string) ([]sources.R
 
 	// LEGACY PATH (all tier fields nil): unchanged behaviour.
 	return fetch.RetryDo(ctx, cfg.Retry, func() ([]sources.Result, error) {
-		return SearchRedditDirect(ctx, cfg.Browser, query, cfg.Metrics)
+		return SearchRedditDirect(ctx, cfg.Browser, query, cfg.Metrics, cfg.TimeRange)
 	})
 }
 
@@ -218,7 +218,7 @@ func runBing(ctx context.Context, cfg DirectConfig, query string) ([]sources.Res
 		}
 	}
 	return fetch.RetryDo(ctx, cfg.Retry, func() ([]sources.Result, error) {
-		return SearchBingDirect(ctx, cfg.Browser, query, cfg.Metrics)
+		return SearchBingDirect(ctx, cfg.Browser, query, cfg.Metrics, cfg.TimeRange)
 	})
 }
 
@@ -253,7 +253,7 @@ func runMojeek(ctx context.Context, cfg DirectConfig, query string) ([]sources.R
 	if !isNilInterface(cfg.MojeekBrowser) {
 		browser = cfg.MojeekBrowser
 	}
-	return SearchMojeekDirect(ctx, browser, query, cfg.Metrics)
+	return SearchMojeekDirect(ctx, browser, query, cfg.Metrics, cfg.TimeRange)
 }
 
 // runOxEscalation is the post-fan-out captcha-escalation tier that routes
@@ -387,7 +387,7 @@ func runOxEngine(ctx context.Context, cfg DirectConfig, query, label string) ([]
 // URL built by websearch.DDGHTMLURL (single-owned in websearch per ADR-8).
 // Parsed by websearch.ParseDDGHTML (proven in prod via searchViaOxBrowser).
 func runOxDDG(ctx context.Context, cfg DirectConfig, query string) ([]sources.Result, string) {
-	u := websearch.DDGHTMLURL(query)
+	u := websearch.DDGHTMLURL(query, websearch.SearchOpts{TimeRange: cfg.TimeRange})
 	html, err := cfg.OxBrowserFetch(ctx, u)
 	if err != nil {
 		slog.Warn("ox escalation ddg: fetch error", slog.Any("error", err))
@@ -408,7 +408,7 @@ func runOxDDG(ctx context.Context, cfg DirectConfig, query string) ([]sources.Re
 // URL built by websearch.BraveSearchURL; parsed by websearch.ParseBraveHTML.
 // Brave is GET-fetchable (ADR-6); Startpage excluded (POST-only → SSRF risk).
 func runOxBrave(ctx context.Context, cfg DirectConfig, query string) ([]sources.Result, string) {
-	u := websearch.BraveSearchURL(query)
+	u := websearch.BraveSearchURL(query, websearch.SearchOpts{TimeRange: cfg.TimeRange})
 	html, err := cfg.OxBrowserFetch(ctx, u)
 	if err != nil {
 		slog.Warn("ox escalation brave: fetch error", slog.Any("error", err))
@@ -430,7 +430,7 @@ func runOxBrave(ctx context.Context, cfg DirectConfig, query string) ([]sources.
 // Parsed by websearch.ParseBingHTML (reused from the Bing scraper path).
 // Bing is GET-fetchable (ADR-6); Startpage excluded (POST-only → SSRF risk).
 func runOxBing(ctx context.Context, cfg DirectConfig, query string) ([]sources.Result, string) {
-	u := websearch.BingSearchURL(query)
+	u := websearch.BingSearchURL(query, websearch.SearchOpts{TimeRange: cfg.TimeRange})
 	html, err := cfg.OxBrowserFetch(ctx, u)
 	if err != nil {
 		slog.Warn("ox escalation bing: fetch error", slog.Any("error", err))
