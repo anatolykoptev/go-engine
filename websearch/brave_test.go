@@ -84,6 +84,35 @@ func TestBrave_RateLimitBody(t *testing.T) {
 	}
 }
 
+// TestBrave_RateLimitBody_I18nFalsePositive verifies that "captcha" appearing
+// in Brave's i18n translation JSON (e.g. "Switch to traditional captcha":"...")
+// does NOT trigger isBraveRateLimited — a false positive that blocks valid
+// result pages fetched via ox-browser /fetch.
+//
+// Falsification: revert isBraveRateLimited to plain bytes.Contains(lower, "captcha")
+// → this test goes RED (i18n body treated as rate-limited).
+func TestBrave_RateLimitBody_I18nFalsePositive(t *testing.T) {
+	// Simulates a real Brave SERP with i18n translations containing "captcha"
+	// and "blocked" in JSON context, plus actual search results.
+	html := `<html><body>
+		<div data-pos="1"><a href="https://example.com/rust"><div class="title">Rust Async</div></a></div>
+		<script>window.translations = {"Switch to traditional captcha":"Switch to traditional CAPTCHA","Blocked Shots":"Blocked shots"}</script>
+	</body></html>`
+
+	bc := &mockBrowser{fn: func(_, _ string, _ map[string]string, _ io.Reader) ([]byte, map[string]string, int, error) {
+		return []byte(html), nil, http.StatusOK, nil
+	}}
+
+	b := NewBrave(WithBraveBrowser(bc))
+	results, err := b.Search(context.Background(), "rust async", SearchOpts{})
+	if err != nil {
+		t.Fatalf("i18n captcha must NOT trigger rate-limit false positive: %v", err)
+	}
+	if len(results) == 0 {
+		t.Fatal("expected results, got 0 — i18n false positive blocked parsing")
+	}
+}
+
 func TestBrave_NoBrowser(t *testing.T) {
 	b := NewBrave()
 	_, err := b.Search(context.Background(), "test", SearchOpts{})

@@ -157,3 +157,66 @@ func TestBing_Search_Mock(t *testing.T) {
 		t.Errorf("URL = %q", results[0].URL)
 	}
 }
+
+// TestParseBingHTML_TilkLayout verifies the new Bing SERP layout returned by
+// ox-browser /fetch, where result links use a.tilk with href (Bing redirect)
+// and cite tags for display URLs, instead of the classic h2 > a pattern.
+//
+// Falsification: remove the a.tilk fallback from ParseBingHTML → this test
+// goes RED (0 results parsed from tilk layout).
+func TestParseBingHTML_TilkLayout(t *testing.T) {
+	html := `<html><body>
+		<ol id="b_results">
+			<li class="b_algo">
+				<div class="b_tpcn"><a class="tilk" aria-label="rust-lang.org" href="https://www.bing.com/ck/a?!&&p=abc&u=a1aHR0cHM6Ly9ydXN0LWxhbmcub3JnLw&ntb=1"></a></div>
+				<div class="b_caption"><cite>https://rust-lang.org</cite><p class="b_lineclamp2">Rust programming language official site.</p></div>
+			</li>
+			<li class="b_algo">
+				<div class="b_tpcn"><a class="tilk" aria-label="doc.rust-lang.org" href="https://www.bing.com/ck/a?u=a1aHR0cHM6Ly9kb2MucnVzdC1sYW5nLm9yZy9ib29r"></a></div>
+				<div class="b_caption"><cite>https://doc.rust-lang.org</cite><p>The Rust book.</p></div>
+			</li>
+		</ol>
+	</body></html>`
+
+	results, err := ParseBingHTML([]byte(html))
+	if err != nil {
+		t.Fatalf("ParseBingHTML: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("got %d results, want 2 (tilk layout)", len(results))
+	}
+
+	// First result: tilk href is a Bing redirect → unwrapped to rust-lang.org
+	if results[0].URL != "https://rust-lang.org/" {
+		t.Errorf("results[0].URL = %q, want https://rust-lang.org/", results[0].URL)
+	}
+
+	// Second result: tilk href → unwrapped to doc.rust-lang.org/book
+	if results[1].URL != "https://doc.rust-lang.org/book" {
+		t.Errorf("results[1].URL = %q, want https://doc.rust-lang.org/book", results[1].URL)
+	}
+}
+
+// TestParseBingHTML_CiteOnlyLayout verifies the fallback where only cite tags
+// are available (no h2 > a, no a.tilk href) — ParseBingHTML should extract
+// the URL from cite text.
+func TestParseBingHTML_CiteOnlyLayout(t *testing.T) {
+	html := `<html><body>
+		<ol id="b_results">
+			<li class="b_algo">
+				<div class="b_caption"><cite>github.com/rust-lang/rust</cite><p>Rust on GitHub.</p></div>
+			</li>
+		</ol>
+	</body></html>`
+
+	results, err := ParseBingHTML([]byte(html))
+	if err != nil {
+		t.Fatalf("ParseBingHTML: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("got %d results, want 1 (cite-only fallback)", len(results))
+	}
+	if results[0].URL != "https://github.com/rust-lang/rust" {
+		t.Errorf("results[0].URL = %q, want https://github.com/rust-lang/rust", results[0].URL)
+	}
+}

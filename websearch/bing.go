@@ -94,6 +94,10 @@ func (b *Bing) Search(ctx context.Context, query string, opts SearchOpts) ([]Res
 }
 
 // ParseBingHTML extracts search results from Bing Search HTML response.
+// Handles two Bing SERP layouts:
+//   - Classic: h2 > a with href (direct or Bing redirect)
+//   - New (ox-browser /fetch): a.tilk with RedirectUrl attr + cite tag for URL,
+//     title in .b_tpcn text or tilk aria-label
 func ParseBingHTML(data []byte) ([]Result, error) {
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(data)))
 	if err != nil {
@@ -103,10 +107,35 @@ func ParseBingHTML(data []byte) ([]Result, error) {
 	var results []Result
 
 	doc.Find("#b_results > li.b_algo").Each(func(_ int, s *goquery.Selection) {
+		// Primary path: h2 > a (classic Bing SERP layout)
 		link := s.Find("h2 a").First()
 		title := strings.TrimSpace(link.Text())
 		href, exists := link.Attr("href")
+
+		// Fallback: a.tilk with cite (new Bing SERP layout from ox-browser /fetch)
 		if !exists || title == "" || href == "" {
+			tilk := s.Find("a.tilk").First()
+			href, exists = tilk.Attr("href")
+			if !exists || href == "" {
+				// Last resort: use cite text as URL
+				citeText := strings.TrimSpace(s.Find("cite").First().Text())
+				if citeText == "" {
+					return
+				}
+				href = citeText
+				if !strings.HasPrefix(href, "http") {
+					href = "https://" + href
+				}
+			}
+			if title == "" {
+				title = strings.TrimSpace(tilk.AttrOr("aria-label", ""))
+				if title == "" {
+					title = strings.TrimSpace(s.Find("cite").First().Text())
+				}
+			}
+		}
+
+		if title == "" || href == "" {
 			return
 		}
 

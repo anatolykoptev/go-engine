@@ -125,18 +125,60 @@ func ParseBraveHTML(data []byte) ([]Result, error) {
 }
 
 // isBraveRateLimited checks if Brave blocked the request.
+// Context-aware: "captcha" appears in Brave's i18n translation JSON
+// (e.g. "Switch to traditional captcha":"Switch to traditional CAPTCHA") even
+// on normal result pages. We distinguish i18n context (key":"value) from a
+// real captcha page where "captcha" appears in plain HTML text.
 func isBraveRateLimited(body []byte) bool {
 	lower := bytes.ToLower(body)
-	markers := [][]byte{
-		[]byte("captcha"),
+
+	// Strong markers — always indicate rate limiting
+	strongMarkers := [][]byte{
 		[]byte("rate limit"),
 		[]byte("too many requests"),
-		[]byte("blocked"),
+		[]byte("unusual traffic"),
+		[]byte("are you a robot"),
+		[]byte("please verify you are human"),
+		[]byte("please solve the captcha"),
 	}
-	for _, m := range markers {
+	for _, m := range strongMarkers {
 		if bytes.Contains(lower, m) {
 			return true
 		}
 	}
+
+	// Weak marker "captcha" — only counts if NOT in i18n JSON context.
+	// Brave's i18n strings look like: "captcha":"Switch to traditional CAPTCHA"
+	// A real captcha page has "captcha" in plain HTML text, not JSON.
+	if bytes.Contains(lower, []byte("captcha")) {
+		if !isCaptchaInI18nContext(lower) {
+			return true
+		}
+	}
+
 	return false
+}
+
+// isCaptchaInI18nContext checks if ALL occurrences of "captcha" in the body
+// are inside i18n JSON strings (key":"value pattern). If at least one
+// occurrence is in plain HTML context, returns false (real captcha page).
+func isCaptchaInI18nContext(lower []byte) bool {
+	idx := 0
+	for {
+		pos := bytes.Index(lower[idx:], []byte("captcha"))
+		if pos < 0 {
+			break
+		}
+		pos += idx
+		// Check surrounding context for JSON key-value pattern
+		start := max(0, pos-20)
+		end := min(len(lower), pos+30)
+		context := lower[start:end]
+		// i18n pattern: "captcha":"... or "captcha": "...
+		if !bytes.Contains(context, []byte(`":"`)) && !bytes.Contains(context, []byte(`": "`)) {
+			return false // found captcha in non-JSON context
+		}
+		idx = pos + len("captcha")
+	}
+	return true
 }
