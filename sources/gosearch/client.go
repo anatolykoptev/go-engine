@@ -85,6 +85,27 @@ func (c *Client) CheckHealth(ctx context.Context) bool {
 // Search calls go-search's raw_web_search tool via MCP JSON-RPC.
 // If includeMedia is true, the request asks raw_web_search to include media/social domains.
 func (c *Client) Search(ctx context.Context, query, timeRange string, includeMedia ...bool) ([]Result, error) {
+	opts := SearchOpts{}
+	if len(includeMedia) > 0 && includeMedia[0] {
+		opts.IncludeMedia = true
+	}
+	return c.SearchWithOpts(ctx, query, timeRange, opts)
+}
+
+// SearchOpts configures a SearchWithOpts call.
+type SearchOpts struct {
+	// Source routes the query through a go-search source profile
+	// (e.g. "piternow" for Saint Petersburg regional media + KudaGo API).
+	// Empty = default web search (unchanged behavior).
+	Source string
+	// IncludeMedia allows image/video/social domains in results.
+	IncludeMedia bool
+}
+
+// SearchWithOpts calls go-search's raw_web_search tool with full option control.
+// Unlike Search, it supports the source parameter for source-profile routing
+// (e.g. source=piternow merges KudaGo SPb API + Piter media SERP).
+func (c *Client) SearchWithOpts(ctx context.Context, query, timeRange string, opts SearchOpts) ([]Result, error) {
 	if c.baseURL == "" {
 		return nil, errors.New("go-search client not configured")
 	}
@@ -93,7 +114,10 @@ func (c *Client) Search(ctx context.Context, query, timeRange string, includeMed
 	if timeRange != "" {
 		args["time_range"] = timeRange
 	}
-	if len(includeMedia) > 0 && includeMedia[0] {
+	if opts.Source != "" {
+		args["source"] = opts.Source
+	}
+	if opts.IncludeMedia {
 		args["include_media"] = true
 	}
 
