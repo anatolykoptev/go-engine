@@ -23,9 +23,10 @@ github.com/RadhiFadlillah/whatlanggo
 github.com/anatolykoptev/go-kit/httputil
 github.com/anatolykoptev/go-kit/llm
 github.com/anatolykoptev/go-kit/metrics
-# github.com/anatolykoptev/go-stealth v1.18.0
+# github.com/anatolykoptev/go-stealth v1.19.1
 ## explicit; go 1.26
 github.com/anatolykoptev/go-stealth
+github.com/anatolykoptev/go-stealth/internal/uri
 github.com/anatolykoptev/go-stealth/proxypool
 github.com/anatolykoptev/go-stealth/ratelimit
 # github.com/andybalholm/brotli v1.2.0
