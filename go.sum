@@ -8,8 +8,8 @@ github.com/RadhiFadlillah/whatlanggo v0.0.0-20240916001553-aac1f0f737fc h1:6aA31
 github.com/RadhiFadlillah/whatlanggo v0.0.0-20240916001553-aac1f0f737fc/go.mod h1:PgrPWaMBxL1lyq1k5DEMqC0Y67R3pG1vEsHzxFXeDxc=
 github.com/anatolykoptev/go-kit v0.97.1 h1:/e7qgw2k1zVORqh7jwIdGGelIbyqcTZP7Z+DLXuFOzM=
 github.com/anatolykoptev/go-kit v0.97.1/go.mod h1:jLGRJLqxCdEfrxH8xmYRPO+ax/ozXnyTcVQXzot5S9w=
-github.com/anatolykoptev/go-stealth v1.18.0 h1:swobMReVwdiM5H/YniXb1g9CS/O55MWFYi8/pvhM77k=
-github.com/anatolykoptev/go-stealth v1.18.0/go.mod h1:1Fevj8WfJDJ9h/t4Bl8MtHbuQ92ZPjIm8SR6/vnwJsQ=
+github.com/anatolykoptev/go-stealth v1.19.1 h1:7w25zGDUMy0kz4cP2p/J9zjCgfUA6U1akBTDMh/M7G4=
+github.com/anatolykoptev/go-stealth v1.19.1/go.mod h1:1Fevj8WfJDJ9h/t4Bl8MtHbuQ92ZPjIm8SR6/vnwJsQ=
 github.com/andybalholm/brotli v1.2.0 h1:ukwgCxwYrmACq68yiUqwIWnGY0cTPox/M94sVwToPjQ=
 github.com/andybalholm/brotli v1.2.0/go.mod h1:rzTDkvFWvIrjDXZHkuS16NPggd91W3kUSvPlQ1pLaKY=
 github.com/andybalholm/cascadia v1.3.3 h1:AG2YHrzJIm4BZ19iwJ/DAua6Btl3IwJX+VI4kktS1LM=
