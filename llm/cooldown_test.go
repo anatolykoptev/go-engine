@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -129,6 +130,12 @@ func TestCooldown_ObserverFires(t *testing.T) {
 		cooling bool
 		d       time.Duration
 	}
+	// The cooldown observer is dispatched async on its own goroutine
+	// (see go-kit llm.fireCooldownObserver), so the callback appends to
+	// events from a different goroutine than the test body that reads it.
+	// mu guards every read and write of events — without it the race
+	// detector flags the slice header / backing-array append.
+	var mu sync.Mutex
 	var events []event
 
 	c := New(
@@ -137,7 +144,9 @@ func TestCooldown_ObserverFires(t *testing.T) {
 		WithModel(primaryModel),
 		WithModelFallbackChain([]string{fallbackModel}),
 		WithModelCooldownObserver(func(model string, cooling bool, d time.Duration) {
+			mu.Lock()
 			events = append(events, event{model: model, cooling: cooling, d: d})
+			mu.Unlock()
 		}),
 	)
 
@@ -148,13 +157,19 @@ func TestCooldown_ObserverFires(t *testing.T) {
 		_, _ = c.Complete(ctx, "hello")
 	}
 
-	if len(events) == 0 {
+	// Snapshot the observer's output under the lock: the async fire
+	// goroutine may still be appending when we read.
+	mu.Lock()
+	snapshot := append([]event(nil), events...)
+	mu.Unlock()
+
+	if len(snapshot) == 0 {
 		t.Fatal("cooldown observer never fired — expected at least one cooling=true event")
 	}
 
 	// At least one event must be cooling=true for the primary model.
 	var sawEntry bool
-	for _, ev := range events {
+	for _, ev := range snapshot {
 		if ev.model == primaryModel && ev.cooling {
 			sawEntry = true
 			if ev.d <= 0 {
@@ -163,6 +178,6 @@ func TestCooldown_ObserverFires(t *testing.T) {
 		}
 	}
 	if !sawEntry {
-		t.Errorf("no cooling=true event for primary model %q in events %+v", primaryModel, events)
+		t.Errorf("no cooling=true event for primary model %q in events %+v", primaryModel, snapshot)
 	}
 }

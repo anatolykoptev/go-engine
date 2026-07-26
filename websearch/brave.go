@@ -17,6 +17,12 @@ import (
 const (
 	braveEndpoint = "https://search.brave.com/search"
 	braveReferer  = "https://search.brave.com/"
+
+	// Bytes of leading/trailing context around a "captcha" occurrence
+	// inspected to decide whether it sits inside an i18n JSON key-value
+	// pair (isCaptchaInI18nContext) rather than plain HTML text.
+	captchaContextLeading  = 20
+	captchaContextTrailing = 30
 )
 
 // BraveSearchURL returns the GET URL for the Brave Search HTML SERP endpoint.
@@ -171,8 +177,8 @@ func isCaptchaInI18nContext(lower []byte) bool {
 		}
 		pos += idx
 		// Check surrounding context for JSON key-value pattern
-		start := max(0, pos-20)
-		end := min(len(lower), pos+30)
+		start := max(0, pos-captchaContextLeading)
+		end := min(len(lower), pos+captchaContextTrailing)
 		context := lower[start:end]
 		// i18n pattern: "captcha":"... or "captcha": "...
 		if !bytes.Contains(context, []byte(`":"`)) && !bytes.Contains(context, []byte(`": "`)) {
