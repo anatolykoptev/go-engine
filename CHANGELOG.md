@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.52.1](https://github.com/anatolykoptev/go-engine/compare/v1.52.0...v1.52.1) (2026-07-26)
+
+
+### Changed
+
+* derive browser UA from go-stealth identity instead of hardcoded pool ([#69](https://github.com/anatolykoptev/go-engine/issues/69)) ([b1bce9e](https://github.com/anatolykoptev/go-engine/commit/b1bce9e41a44ee752d61065805a5a5ffd40bec30))
+
 ## [1.52.0](https://github.com/anatolykoptev/go-engine/compare/v1.51.5...v1.52.0) (2026-07-26)
 
 
