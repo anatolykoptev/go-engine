@@ -33,7 +33,7 @@ func (y *YandexImages) Search(ctx context.Context, doer BrowserDoer, query strin
 	u := yandexImagesURL + "?text=" + url.QueryEscape(query)
 
 	// Try plain HTTP first (works without Chrome).
-	headers := searchHeaders()
+	headers := searchHeadersFor(doer)
 	headers["accept-language"] = "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7"
 
 	data, respHeaders, status, err := doer.Do(http.MethodGet, u, headers, nil)

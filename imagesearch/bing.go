@@ -37,7 +37,7 @@ func (b *BingImages) Search(ctx context.Context, doer BrowserDoer, query string,
 	u := fmt.Sprintf("%s?q=%s&first=0&count=%d&mmasync=1",
 		bingAsyncURL, url.QueryEscape(query), count)
 
-	headers := searchHeaders()
+	headers := searchHeadersFor(doer)
 	headers["accept-language"] = "en-US,en;q=0.9"
 
 	data, _, status, err := doer.Do(http.MethodGet, u, headers, nil)

@@ -483,6 +483,14 @@ func (f *Fetcher) DirectClient() *stealth.BrowserClient {
 func (f *Fetcher) fetchViaProxy(ctx context.Context, fetchURL string, extra map[string]string) ([]byte, error) {
 	headers := ChromeHeaders()
 	headers["accept"] = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+	// Override the UA with the proxy client's identity so it matches the JA3
+	// fingerprint the stealth BrowserClient actually presents. stealth.ChromeHeaders
+	// returns a Chrome 146 UA while the default profile is Chrome 131 — a
+	// self-inconsistent pair. In tests (mock proxyClient), the type assertion
+	// fails and the ChromeHeaders default is preserved.
+	if bc, ok := f.proxyClient.(*stealth.BrowserClient); ok && bc != nil {
+		headers["user-agent"] = bc.Identity().UserAgent
+	}
 	for k, v := range extra {
 		headers[strings.ToLower(k)] = v
 	}
@@ -544,6 +552,13 @@ func (f *Fetcher) fetchDirectRaw(ctx context.Context, fetchURL string, extra map
 
 	headers := ChromeHeaders()
 	headers["accept"] = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+	// Override the UA with the direct client's identity so it matches the JA3
+	// fingerprint the stealth BrowserClient actually presents (same rationale
+	// as fetchViaProxy). In tests (mock directClient), the type assertion
+	// fails and the ChromeHeaders default is preserved.
+	if bc, ok := f.directClient.(*stealth.BrowserClient); ok && bc != nil {
+		headers["user-agent"] = bc.Identity().UserAgent
+	}
 	for k, v := range extra {
 		headers[strings.ToLower(k)] = v
 	}

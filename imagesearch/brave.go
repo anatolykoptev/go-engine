@@ -36,7 +36,7 @@ func (b *BraveImages) Search(ctx context.Context, doer BrowserDoer, query string
 	}
 
 	u := braveImagesURL + "?q=" + url.QueryEscape(query) + "&source=web"
-	headers := searchHeaders()
+	headers := searchHeadersFor(doer)
 	headers["cookie"] = braveCookie
 
 	data, _, status, err := doer.Do(http.MethodGet, u, headers, nil)

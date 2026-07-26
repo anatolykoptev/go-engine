@@ -66,7 +66,7 @@ func (b *Bing) Search(ctx context.Context, query string, opts SearchOpts) ([]Res
 
 	u := BingSearchURL(query, opts)
 
-	headers := ChromeHeaders()
+	headers := ChromeHeadersFor(b.browser)
 	headers["referer"] = bingReferer
 	headers["accept"] = acceptHTML
 
