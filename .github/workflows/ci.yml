@@ -16,7 +16,10 @@ jobs:
           go-version-file: go.mod
       - uses: golangci/golangci-lint-action@v7
         with:
-          version: v2.1.6
+          # v2.9.0 is the first golangci-lint release built with go1.26
+          # (go-engine targets go 1.26 per go.mod). v2.1.6 was built with
+          # go1.24 and refused the config outright (issue #71).
+          version: v2.9.0
 
   test:
     runs-on: ubuntu-latest
