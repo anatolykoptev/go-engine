@@ -32,7 +32,7 @@ func (d *DdgImages) Search(ctx context.Context, doer BrowserDoer, query string, 
 
 	// Step 1: fetch homepage to get vqd token.
 	tokenURL := ddgImagesHome + "?q=" + url.QueryEscape(query) + "&iax=images&ia=images"
-	headers := searchHeaders()
+	headers := searchHeadersFor(doer)
 	headers["referer"] = ddgImagesHome
 	headers["cookie"] = ddgCookie
 
@@ -53,7 +53,7 @@ func (d *DdgImages) Search(ctx context.Context, doer BrowserDoer, query string, 
 	imagesURL := fmt.Sprintf("%s?l=wt-wt&o=json&q=%s&vqd=%s&f=,,,,,&p=1",
 		ddgImagesAPI, url.QueryEscape(query), url.QueryEscape(vqd))
 
-	imgHeaders := searchHeaders()
+	imgHeaders := searchHeadersFor(doer)
 	imgHeaders["referer"] = ddgImagesHome
 	imgHeaders["x-requested-with"] = "XMLHttpRequest"
 	imgHeaders["sec-fetch-site"] = "same-origin"

@@ -8,8 +8,8 @@ github.com/RadhiFadlillah/whatlanggo v0.0.0-20240916001553-aac1f0f737fc h1:6aA31
 github.com/RadhiFadlillah/whatlanggo v0.0.0-20240916001553-aac1f0f737fc/go.mod h1:PgrPWaMBxL1lyq1k5DEMqC0Y67R3pG1vEsHzxFXeDxc=
 github.com/anatolykoptev/go-kit v0.97.1 h1:/e7qgw2k1zVORqh7jwIdGGelIbyqcTZP7Z+DLXuFOzM=
 github.com/anatolykoptev/go-kit v0.97.1/go.mod h1:jLGRJLqxCdEfrxH8xmYRPO+ax/ozXnyTcVQXzot5S9w=
-github.com/anatolykoptev/go-stealth v1.19.1 h1:7w25zGDUMy0kz4cP2p/J9zjCgfUA6U1akBTDMh/M7G4=
-github.com/anatolykoptev/go-stealth v1.19.1/go.mod h1:1Fevj8WfJDJ9h/t4Bl8MtHbuQ92ZPjIm8SR6/vnwJsQ=
+github.com/anatolykoptev/go-stealth v1.22.0 h1:0lIVJw6D4mWgKEdLk/oWwUY0GsAGcmKFWxPaege5WWQ=
+github.com/anatolykoptev/go-stealth v1.22.0/go.mod h1:F5CBYCCWBfQ+Acf3njuGHGWgn/Ce79JV3gx002vg1Bs=
 github.com/andybalholm/brotli v1.2.0 h1:ukwgCxwYrmACq68yiUqwIWnGY0cTPox/M94sVwToPjQ=
 github.com/andybalholm/brotli v1.2.0/go.mod h1:rzTDkvFWvIrjDXZHkuS16NPggd91W3kUSvPlQ1pLaKY=
 github.com/andybalholm/cascadia v1.3.3 h1:AG2YHrzJIm4BZ19iwJ/DAua6Btl3IwJX+VI4kktS1LM=
@@ -26,8 +26,8 @@ github.com/bogdanfinn/fhttp v0.6.8 h1:LiQyHOY3i0QoxxNB7nq27/nGNNbtPj0fuBPozhR7Ws
 github.com/bogdanfinn/fhttp v0.6.8/go.mod h1:A+EKDzMx2hb4IUbMx4TlkoHnaJEiLl8r/1Ss1Y+5e5M=
 github.com/bogdanfinn/quic-go-utls v1.0.9-utls h1:tV6eDEiRbRCcepALSzxR94JUVD3N3ACIiRLgyc2Ep8s=
 github.com/bogdanfinn/quic-go-utls v1.0.9-utls/go.mod h1:aHph9B9H9yPOt5xnhWKSOum27DJAqpiHzwX+gjvaXcg=
-github.com/bogdanfinn/tls-client v1.14.0 h1:vyk7Cn4BIvLAGVuMfb0tP22OqogfO1lYamquQNEZU1A=
-github.com/bogdanfinn/tls-client v1.14.0/go.mod h1:LsU6mXVn8MOFDwTkyRfI7V1BZM1p0wf2ZfZsICW/1fM=
+github.com/bogdanfinn/tls-client v1.15.1 h1:KiFAlED55DJ8Fcocn+/1nX6PrDFcttIHAf/GDkV6KN8=
+github.com/bogdanfinn/tls-client v1.15.1/go.mod h1:LsU6mXVn8MOFDwTkyRfI7V1BZM1p0wf2ZfZsICW/1fM=
 github.com/bogdanfinn/utls v1.7.7-barnius h1:OuJ497cc7F3yKNVHRsYPQdGggmk5x6+V5ZlrCR7fOLU=
 github.com/bogdanfinn/utls v1.7.7-barnius/go.mod h1:aAK1VZQlpKZClF1WEQeq6kyclbkPq4hz6xTbB5xSlmg=
 github.com/bogdanfinn/websocket v1.5.5-barnius h1:bY+qnxpai1qe7Jmjx+Sds/cmOSpuuLoR8x61rWltjOI=

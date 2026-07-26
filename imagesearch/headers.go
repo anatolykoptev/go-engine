@@ -2,12 +2,22 @@ package imagesearch
 
 import stealth "github.com/anatolykoptev/go-stealth"
 
-// searchHeaders returns Chrome-like headers without accept-encoding.
+// searchHeadersFor returns Chrome-like headers without accept-encoding, with
+// the User-Agent derived from d's identity so it agrees with the JA3
+// fingerprint the presenting stealth client sends. d is the BrowserDoer the
+// caller will issue the request through; pass nil to resolve from the default
+// profile (ProfileChrome131).
+//
 // Go's http.Client handles decompression automatically when accept-encoding
 // is not explicitly set; setting it manually disables auto-decompression
 // and causes regex parsers to fail on compressed responses.
-func searchHeaders() map[string]string {
+func searchHeadersFor(d any) map[string]string {
 	h := stealth.ChromeHeaders()
+	if bc, ok := d.(*stealth.BrowserClient); ok && bc != nil {
+		h["user-agent"] = bc.Identity().UserAgent
+	} else {
+		h["user-agent"] = stealth.UserAgentForProfile(stealth.ProfileChrome131)
+	}
 	delete(h, "accept-encoding")
 	return h
 }

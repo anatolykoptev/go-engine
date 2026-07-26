@@ -6,7 +6,7 @@ require (
 	github.com/JohannesKaufmann/html-to-markdown/v2 v2.5.0
 	github.com/PuerkitoBio/goquery v1.11.0
 	github.com/anatolykoptev/go-kit v0.97.1
-	github.com/anatolykoptev/go-stealth v1.19.1
+	github.com/anatolykoptev/go-stealth v1.22.0
 	github.com/markusmobius/go-trafilatura v1.12.2
 	github.com/prometheus/client_golang v1.23.2
 	golang.org/x/net v0.57.0
@@ -24,7 +24,7 @@ require (
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/bogdanfinn/fhttp v0.6.8 // indirect
 	github.com/bogdanfinn/quic-go-utls v1.0.9-utls // indirect
-	github.com/bogdanfinn/tls-client v1.14.0 // indirect
+	github.com/bogdanfinn/tls-client v1.15.1 // indirect
 	github.com/bogdanfinn/utls v1.7.7-barnius // indirect
 	github.com/bogdanfinn/websocket v1.5.5-barnius // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect

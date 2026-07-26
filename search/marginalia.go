@@ -41,7 +41,7 @@ func SearchMarginaliaDirect(ctx context.Context, bc BrowserDoer, query string, m
 
 	apiURL := "https://api.marginalia.nu/public/search/" + url.PathEscape(query) + "?count=10"
 
-	headers := websearch.ChromeHeaders()
+	headers := websearch.ChromeHeadersFor(bc)
 	headers["accept"] = "application/json"
 
 	data, _, status, err := bc.Do(http.MethodGet, apiURL, headers, nil)
