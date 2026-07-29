@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/anatolykoptev/go-engine/fetch"
+	"github.com/anatolykoptev/go-engine/metrics"
 )
 
 // TestSearchDirect_Stats_AllBlocked: every enabled leg returns an error.
@@ -256,5 +257,105 @@ func TestSearchDirect_Stats_Invariant(t *testing.T) {
 					stats.OK, stats.Empty, stats.Failed, got, stats.Attempted)
 			}
 		})
+	}
+}
+
+// TestCollectResults_ShedNotCountedAsFailure asserts that a budget-shed result
+// (ErrMarginaliaQuotaExhausted) is recorded as outcome="shed" and counted in
+// stats.Shed, but does NOT increment stats.Failed or stats.Attempted.
+//
+// RED-ON-REVERT: remove the shed intercept in collectResults (let it fall to
+// the r.err != nil → stats.Failed++ + handleSourceError default: path) →
+// stats.Failed = 1 (not 0), stats.Shed = 0 (not 1), stats.Attempted = 1 (not
+// 0) → all three assertions fail.
+func TestCollectResults_ShedNotCountedAsFailure(t *testing.T) {
+	ch := make(chan directResult, 1)
+	ch <- directResult{label: "marginalia", results: nil, err: ErrMarginaliaQuotaExhausted}
+	close(ch)
+
+	_, stats := collectResults(ch, nil, 1000, func() {}, nil, nil)
+
+	if stats.Shed != 1 {
+		t.Errorf("Shed = %d, want 1 (one shed result)", stats.Shed)
+	}
+	if stats.Failed != 0 {
+		t.Errorf("Failed = %d, want 0 (a shed is NOT a failure)", stats.Failed)
+	}
+	if stats.Attempted != 0 {
+		t.Errorf("Attempted = %d, want 0 (a shed is NOT an attempt — no request issued)", stats.Attempted)
+	}
+	if stats.OK != 0 {
+		t.Errorf("OK = %d, want 0", stats.OK)
+	}
+}
+
+// TestCollectResults_ShedAloneDoesNotTripDegradedMode asserts that a shed-only
+// fan-out (Marginalia sole source, budget exhausted) does NOT trip the
+// degraded-mode signal (Attempted > 0 && OK == 0). Because a shed is excluded
+// from Attempted, Attempted stays 0 and the signal is false.
+//
+// RED-ON-REVERT: restore the default: classification (shed counted as
+// Attempted + Failed) → Attempted = 1, OK = 0 → the degraded signal
+// (Attempted>0 && OK==0) is TRUE → the assertion fails.
+func TestCollectResults_ShedAloneDoesNotTripDegradedMode(t *testing.T) {
+	ch := make(chan directResult, 1)
+	ch <- directResult{label: "marginalia", results: nil, err: ErrMarginaliaQuotaExhausted}
+	close(ch)
+
+	_, stats := collectResults(ch, nil, 1000, func() {}, nil, nil)
+
+	// The degraded-mode signal the caller checks: Attempted > 0 && OK == 0.
+	degraded := stats.Attempted > 0 && stats.OK == 0
+	if degraded {
+		t.Errorf("degraded-mode signal tripped by a shed: Attempted=%d OK=%d Shed=%d — "+
+			"a quota decision must not raise a false censorship alarm",
+			stats.Attempted, stats.OK, stats.Shed)
+	}
+}
+
+// TestSearchDirect_MarginaliaShedDoesNotTripDegradedMode is the end-to-end
+// version: Marginalia is the ONLY enabled source, the budget is exhausted, so
+// runMarginalia sheds. The returned DirectStats must NOT trip the degraded-mode
+// signal. This proves the fix holds through the full SearchDirect →
+// runMarginalia → collectResults path, not just the unit-level collectResults.
+//
+// RED-ON-REVERT: remove the shed intercept in collectResults → the shed error
+// falls to handleSourceError default: → stats.Failed=1, stats.Attempted=1 →
+// degraded = true → the assertion fails.
+func TestSearchDirect_MarginaliaShedDoesNotTripDegradedMode(t *testing.T) {
+	m := metrics.New()
+	budget := NewMarginaliaBudget(0, m) // 0 → default limit, but we exhaust it
+	// Exhaust the budget so the next call sheds.
+	for i := 0; i < defaultMarginaliaDailyBudget; i++ {
+		if !budget.Acquire() {
+			t.Fatalf("setup: budget.Acquire returned false before limit reached (i=%d)", i)
+		}
+	}
+
+	bc := &stubDoer{status: 200, body: `{"results":[]}`}
+	cfg := DirectConfig{
+		Browser:          bc,
+		Marginalia:       true,
+		MarginaliaBudget: budget,
+		Metrics:          m,
+	}
+
+	_, stats := SearchDirect(context.Background(), cfg, "golang", "en")
+
+	if stats.Shed != 1 {
+		t.Errorf("Shed = %d, want 1 (Marginalia was budget-shed)", stats.Shed)
+	}
+	if stats.Failed != 0 {
+		t.Errorf("Failed = %d, want 0 (shed is not a failure)", stats.Failed)
+	}
+	if stats.Attempted != 0 {
+		t.Errorf("Attempted = %d, want 0 (shed is not an attempt)", stats.Attempted)
+	}
+	degraded := stats.Attempted > 0 && stats.OK == 0
+	if degraded {
+		t.Errorf("degraded-mode signal tripped by Marginalia shed: %+v", stats)
+	}
+	if bc.called != 0 {
+		t.Errorf("browser called %d times on shed, want 0 (no HTTP on shed)", bc.called)
 	}
 }
