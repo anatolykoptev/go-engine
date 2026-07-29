@@ -55,16 +55,32 @@ type DirectConfig struct {
 	// Browser is permanently blocked for it; the dualBrowser fallback only
 	// escalates on 402/407/5xx, not the 403 Mojeek returns. When nil, runMojeek
 	// falls back to Browser (default, backward-compatible).
-	MojeekBrowser    BrowserDoer
-	DDG              bool
-	Startpage        bool
-	Brave            bool
-	Reddit           bool
-	Bing             bool
-	Yep              bool
-	Wikipedia        bool
-	Marginalia       bool
-	Mojeek           bool
+	MojeekBrowser BrowserDoer
+	DDG           bool
+	Startpage     bool
+	Brave         bool
+	Reddit        bool
+	Bing          bool
+	Yep           bool
+	Wikipedia     bool
+	Marginalia    bool
+	Mojeek        bool
+
+	// MarginaliaKey is the API key path segment for the Marginalia Nu search
+	// API. The maintainer grants a personal non-commercial key; an empty value
+	// defaults to "public" (the shared, heavily-rate-limited demo key) so
+	// existing consumers keep working unchanged. The key is url.PathEscape'd
+	// and never logged or included in an error.
+	MarginaliaKey string
+
+	// MarginaliaBudget, when non-nil, caps Marginalia queries per UTC calendar
+	// day before the request is issued; an exhausted budget sheds load
+	// promptly with ErrMarginaliaQuotaExhausted instead of issuing the call.
+	// When nil, runMarginalia falls back to a package-level default budget
+	// (limit = 80) so the courtesy quota is still protected; wire
+	// NewMarginaliaBudget with the consumer's *metrics.Registry to also
+	// publish the remaining-budget gauge.
+	MarginaliaBudget *MarginaliaBudget
 	Yandex           YandexConfig
 	Retry            fetch.RetryConfig
 	Metrics          *metrics.Registry

@@ -234,8 +234,23 @@ func runWikipedia(ctx context.Context, cfg DirectConfig, query, language string)
 }
 
 // runMarginalia fetches Marginalia indie-web search results.
+//
+// The daily budget is enforced BEFORE the request is issued: an exhausted
+// budget sheds promptly with ErrMarginaliaQuotaExhausted (a distinguishable
+// shed outcome, not an engine failure) and the outbound HTTP call is never
+// made. When cfg.MarginaliaBudget is nil a package-level default budget
+// (limit = defaultMarginaliaDailyBudget) is used so the courtesy quota is
+// protected even under operator misconfiguration; wiring a budget with the
+// consumer's *metrics.Registry additionally publishes the remaining gauge.
 func runMarginalia(ctx context.Context, cfg DirectConfig, query string) ([]sources.Result, error) {
-	return SearchMarginaliaDirect(ctx, cfg.Browser, query, cfg.Metrics)
+	budget := cfg.MarginaliaBudget
+	if budget == nil {
+		budget = defaultMarginaliaBudget
+	}
+	if !budget.Acquire() {
+		return nil, ErrMarginaliaQuotaExhausted
+	}
+	return SearchMarginaliaDirect(ctx, cfg.Browser, query, cfg.MarginaliaKey, cfg.Metrics)
 }
 
 // runMojeek fetches Mojeek search results via HTML scraping.
