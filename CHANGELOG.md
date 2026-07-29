@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.53.0](https://github.com/anatolykoptev/go-engine/compare/v1.52.2...v1.53.0) (2026-07-29)
+
+
+### Added
+
+* **search:** configurable Marginalia key with a fail-closed daily budget ([#81](https://github.com/anatolykoptev/go-engine/issues/81)) ([9efd9d8](https://github.com/anatolykoptev/go-engine/commit/9efd9d8e14407941be70fc6f887b2f587cbaefd2))
+
 ## [1.52.2](https://github.com/anatolykoptev/go-engine/compare/v1.52.1...v1.52.2) (2026-07-29)
 
 
