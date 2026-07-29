@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/anatolykoptev/go-engine/fetch"
+	"github.com/anatolykoptev/go-engine/metrics"
 	"github.com/anatolykoptev/go-engine/sources"
 	"github.com/anatolykoptev/go-engine/websearch"
 )
@@ -331,17 +332,17 @@ func runOxEscalation(ctx context.Context, cfg DirectConfig, query string, merged
 	resultCh := make(chan oxOut, len(eligible))
 	var wg sync.WaitGroup
 
-	for _, label := range eligible {
-		// TryAcquire: non-blocking — skip if semaphore full to avoid queuing
-		// on the shared Chromium resource (go-wowa ContextPool is the authoritative
-		// server-side bound; client TryAcquire is a courtesy first-line cap).
-		select {
-		case sem <- struct{}{}:
-		default:
-			slog.Debug("ox escalation: semaphore full, skipping engine", slog.String("engine", label))
-			recordOxEscalation(cfg.Metrics, label, "skipped")
-			continue
-		}
+	// Acquire ALL semaphore slots BEFORE launching any goroutine. This
+	// separates admission from execution so a fast-completing goroutine cannot
+	// release its slot before the next engine's TryAcquire — which would let an
+	// instant-return stub bypass the cap (both engines run sequentially instead
+	// of one being skipped). With real ~30s renders the interleaving never
+	// mattered, but the acquire-then-launch ordering makes the cap deterministic
+	// regardless of goroutine scheduling.
+	acquired := acquireOxSlots(sem, eligible, cfg.Metrics)
+
+	// Launch phase: run only the engines that acquired a slot.
+	for _, label := range acquired {
 		wg.Add(1)
 		go func(l string) {
 			defer wg.Done()
@@ -375,6 +376,26 @@ func runOxEscalation(ctx context.Context, cfg DirectConfig, query string, merged
 		all = append(all, r.results...)
 	}
 	return all
+}
+
+// acquireOxSlots TryAcquires the ox-escalation semaphore for each eligible
+// engine, returning the labels that got a slot. Engines that do not get a slot
+// are recorded with outcome="skipped". All acquires complete before any
+// goroutine is launched so a fast-completing goroutine cannot release its slot
+// before the next engine's TryAcquire (which would bypass the cap under
+// instant-return stubs).
+func acquireOxSlots(sem chan<- struct{}, eligible []string, m *metrics.Registry) []string {
+	var acquired []string
+	for _, label := range eligible {
+		select {
+		case sem <- struct{}{}:
+			acquired = append(acquired, label)
+		default:
+			slog.Debug("ox escalation: semaphore full, skipping engine", slog.String("engine", label))
+			recordOxEscalation(m, label, "skipped")
+		}
+	}
+	return acquired
 }
 
 // runOxEngine dispatches to the engine-specific ox-browser SERP runner.
