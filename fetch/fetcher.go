@@ -65,7 +65,7 @@ type Fetcher struct {
 	proxyPool         proxypool.ProxyPool    // deferred: used to build browserClient in New()
 	cookieProvider    stealth.CookieProvider // deferred: passed to stealth.NewClient in New()
 	byparrURL         string                 // Byparr fallback URL (empty = disabled)
-	oxBrowserURL      string                 // ox-browser /fetch-smart fallback (empty = disabled)
+	oxBrowserURL      string                 // ox-browser /fetch fallback (empty = disabled)
 	goBrowserURL      string                 // go-browser /render fallback (empty = disabled)
 	directFirst       bool                   // when true, try direct before proxy
 	blockCache        *DirectBlockCache      // tracks hosts that blocked direct requests
