@@ -242,15 +242,22 @@ func runWikipedia(ctx context.Context, cfg DirectConfig, query, language string)
 // (limit = defaultMarginaliaDailyBudget) is used so the courtesy quota is
 // protected even under operator misconfiguration; wiring a budget with the
 // consumer's *metrics.Registry additionally publishes the remaining gauge.
+//
+// isNilInterface (not a plain == nil) guards the typed-nil pitfall: an
+// interface holding a typed-nil *MarginaliaBudget passes `!= nil` and then
+// panics on Acquire. This is the same guard used for MojeekBrowser.
+//
+// The HTTP caller (searchMarginaliaDirect) is unexported, so runMarginalia is
+// the sole guarded entry point — no external code can bypass the budget check.
 func runMarginalia(ctx context.Context, cfg DirectConfig, query string) ([]sources.Result, error) {
 	budget := cfg.MarginaliaBudget
-	if budget == nil {
+	if isNilInterface(budget) {
 		budget = defaultMarginaliaBudget
 	}
 	if !budget.Acquire() {
 		return nil, ErrMarginaliaQuotaExhausted
 	}
-	return SearchMarginaliaDirect(ctx, cfg.Browser, query, cfg.MarginaliaKey, cfg.Metrics)
+	return searchMarginaliaDirect(ctx, cfg.Browser, query, cfg.MarginaliaKey, cfg.Metrics)
 }
 
 // runMojeek fetches Mojeek search results via HTML scraping.

@@ -76,11 +76,14 @@ type DirectConfig struct {
 	// MarginaliaBudget, when non-nil, caps Marginalia queries per UTC calendar
 	// day before the request is issued; an exhausted budget sheds load
 	// promptly with ErrMarginaliaQuotaExhausted instead of issuing the call.
-	// When nil, runMarginalia falls back to a package-level default budget
-	// (limit = 80) so the courtesy quota is still protected; wire
-	// NewMarginaliaBudget with the consumer's *metrics.Registry to also
-	// publish the remaining-budget gauge.
-	MarginaliaBudget *MarginaliaBudget
+	// The type is the MarginaliaBudgetGate interface so the consuming repo can
+	// inject a restart-surviving Redis-backed gate (same shape as
+	// internal/engine/brave_api_cap.go, but UTC calendar day, not monthly TTL —
+	// see the MarginaliaBudgetGate doc). When nil, runMarginalia falls back to
+	// a package-level default in-memory budget (limit = 80) so the courtesy
+	// quota is still protected; wire NewMarginaliaBudget with the consumer's
+	// *metrics.Registry to also publish the remaining-budget gauge.
+	MarginaliaBudget MarginaliaBudgetGate
 	Yandex           YandexConfig
 	Retry            fetch.RetryConfig
 	Metrics          *metrics.Registry
@@ -191,17 +194,25 @@ type directJob struct {
 // indistinguishable from genuine zero results at the call site.
 //
 // Accounting:
-//   - Attempted = legs that reached the channel (launched goroutines that completed
-//     or timed out). IsBlocked-skipped legs are NOT counted here.
+//   - Attempted = legs that reached the channel AND issued a real request
+//     (launched goroutines that completed or timed out). IsBlocked-skipped legs
+//     and budget-shed legs are NOT counted here — a shed is a deliberate
+//     rationing decision, not an attempt, so it cannot trip the degraded-mode
+//     signal.
 //   - OK        = legs that returned ≥1 result.
 //   - Empty     = legs that returned 0 results without error (silent-block signature).
 //   - Failed    = legs that returned any error (captcha / timeout / blocked / network).
-//   - Invariant: Attempted == OK + Empty + Failed.
+//   - Shed      = legs rationed by a per-source budget before any request was
+//     issued (e.g. ErrMarginaliaQuotaExhausted). Deliberate, not a failure.
+//   - Invariant: Attempted == OK + Empty + Failed. Shed is separate (not in
+//     Attempted) so the degraded-mode check (Attempted>0 && OK==0) cannot be
+//     tripped by rationing alone.
 type DirectStats struct {
 	Attempted int
 	OK        int
 	Empty     int
 	Failed    int
+	Shed      int
 }
 
 // runSourceWithTimeout executes fn inside a goroutine that is capped by srcCtx.
@@ -252,7 +263,7 @@ func runSourceWithTimeout(srcCtx context.Context, label string, fn func(context.
 }
 
 // metricSourceResult is the per-source fan-out outcome counter. Encoded as
-// name{source=<label>,outcome=ok|empty|captcha|timeout|blocked|fail} so the
+// name{source=<label>,outcome=ok|empty|captcha|timeout|blocked|fail|shed} so the
 // go-kit/metrics Prometheus bridge surfaces it as
 // go_search_source_result_total{source="yep",outcome="fail"}.
 //
@@ -270,6 +281,11 @@ func runSourceWithTimeout(srcCtx context.Context, label string, fn func(context.
 //     JS challenge body that the JSON parser rejects); engine marked in BlockCache
 //   - fail    — source returned any other error (incl. context.Canceled early-return
 //     and context.DeadlineExceeded inherited from the parent ctx)
+//   - shed    — per-source budget rationed the call before any request was issued
+//     (e.g. ErrMarginaliaQuotaExhausted). Deliberate, NOT a failure: a
+//     working-but-rationed source must not read as broken. Excluded from
+//     DirectStats.Attempted so the degraded-mode signal cannot be tripped by
+//     rationing alone.
 //
 // Rationale: a source failing 100% (e.g. yep on the deprecated endpoint) was
 // invisible because a sibling source (yandex) silently covered the result set.
@@ -502,11 +518,31 @@ func handleSourceError(r directResult, m *metrics.Registry, blockCache *fetch.Di
 // escalation semantics to timeout. This closes the detection gap where d.js
 // challenges were silently swallowed as outcome="fail" without ever triggering the
 // stealth-render tier.
+//
+// shed outcome: a budget-shed error (errors.Is ErrMarginaliaQuotaExhausted) is
+// intercepted BEFORE the Attempted++ / Failed++ accounting. It is recorded as
+// outcome="shed" and counted in stats.Shed, but excluded from Attempted and
+// Failed — a deliberate rationing decision is neither an attempt nor a failure.
+// This prevents a shed from tripping the degraded-mode signal (Attempted>0 &&
+// OK==0) or reading as a source failure in the outcome metric.
 func collectResults(ch <-chan directResult, m *metrics.Registry, earlyAt int, cancel context.CancelFunc, blockCache *fetch.DirectBlockCache, oxEscalate []string) ([]sources.Result, DirectStats) {
 	var all []sources.Result
 	var stats DirectStats
 	var cancelled bool
 	for r := range ch {
+		// Shed: a per-source budget rationed the call before any request was
+		// issued (e.g. ErrMarginaliaQuotaExhausted). This is a deliberate shed,
+		// NOT an engine failure: it must not be counted as Attempted (so it
+		// cannot trip the degraded-mode signal Attempted>0 && OK==0) nor as
+		// Failed (so a working-but-rationed source does not read as broken in
+		// the source_result_total metric). Recorded under a distinct "shed"
+		// outcome label and counted in stats.Shed.
+		if errors.Is(r.err, ErrMarginaliaQuotaExhausted) {
+			stats.Shed++
+			recordSourceResult(m, r.label, "shed")
+			slog.Info("search source shed (quota exhausted)", slog.String("source", r.label))
+			continue
+		}
 		stats.Attempted++
 		if m != nil {
 			m.ObserveSeconds(

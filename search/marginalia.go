@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -64,18 +65,28 @@ type marginaliaResp struct {
 	} `json:"results"`
 }
 
-// SearchMarginaliaDirect queries the Marginalia Nu search API.
+// searchMarginaliaDirect queries the Marginalia Nu search API.
+//
+// Unexported deliberately: this function issues the HTTP call with no budget
+// guard — the per-call quota gate lives in runMarginalia (the sole caller).
+// Keeping the HTTP caller package-private is defense-in-depth: no external
+// code can reach the transport layer without going through runMarginalia's
+// budget.Acquire check, so the quota cannot be spent unguarded. The
+// structural invariant (HTTP caller is unexported) is asserted by
+// TestMarginalia_HTTPCallerNotExported.
+//
 // key is the API key path segment (the maintainer grants a personal
-// non-commercial key); an empty key defaults to "public", the shared
-// heavily-rate-limited demo key, preserving prior behaviour. The key is
-// url.PathEscape'd exactly like the query so a key with an unexpected
+// non-commercial key); an empty or whitespace-only key defaults to "public",
+// the shared heavily-rate-limited demo key, preserving prior behaviour. The
+// key is url.PathEscape'd exactly like the query so a key with an unexpected
 // character cannot produce a malformed URL or silently hit a different path.
 // Returns nil, nil on 429 (rate-limited) so callers degrade gracefully.
 //
-// The key is never logged and never included in a returned error: a *url.Error
-// from the underlying transport would carry the full URL (and thus the key) in
-// its message, so any bc.Do error is re-wrapped with the URL stripped.
-func SearchMarginaliaDirect(ctx context.Context, bc BrowserDoer, query, key string, m *metrics.Registry) ([]sources.Result, error) {
+// The key is never logged and never included in a returned error: the key is
+// redacted from any error string unconditionally (regardless of the error's
+// concrete type), not only from *url.Error — a custom BrowserDoer may return
+// an error whose text embeds the request URL, and the key is a path segment.
+func searchMarginaliaDirect(ctx context.Context, bc BrowserDoer, query, key string, m *metrics.Registry) ([]sources.Result, error) {
 	if m != nil {
 		m.Incr(metricMarginaliaRequests)
 	}
@@ -83,26 +94,39 @@ func SearchMarginaliaDirect(ctx context.Context, bc BrowserDoer, query, key stri
 		return nil, err
 	}
 
+	// Trim before the empty check so a whitespace-only key falls back to
+	// "public" instead of escaping to "%20" and producing a 404.
+	key = strings.TrimSpace(key)
 	if key == "" {
 		key = "public"
 	}
 	apiURL := "https://api.marginalia.nu/" + url.PathEscape(key) + "/search/" + url.PathEscape(query) + "?count=10"
+
+	// redactKey is the sensitive key value to scrub from error strings. "public"
+	// is not sensitive. Both the raw and the url.PathEscape'd form appear in
+	// the URL path, so both must be redacted.
+	redactKey := key
+	if redactKey == "public" {
+		redactKey = ""
+	}
 
 	headers := websearch.ChromeHeadersFor(bc)
 	headers["accept"] = "application/json"
 
 	data, _, status, err := bc.Do(http.MethodGet, apiURL, headers, nil)
 	if err != nil {
-		// Strip the URL from any *url.Error in the chain: the URL path segment
-		// carries the API key, which must not reach a log or error message.
-		// The underlying error is preserved (via %w on the unwrapped Err) so
-		// errors.Is(err, context.Canceled/DeadlineExceeded) still holds for
-		// upstream classification.
-		var ue *url.Error
-		if errors.As(err, &ue) {
-			return nil, fmt.Errorf("marginalia: request failed: %w", ue.Err)
+		// Redact the key from the error string unconditionally, regardless of
+		// the error's concrete type. The key is a path segment, so any error
+		// text carrying the request URL carries the key. The prior code only
+		// stripped *url.Error; a custom BrowserDoer returning a plain error
+		// whose text embeds the URL would leak the key through handleSourceError
+		// logging. The underlying error chain is preserved (via Unwrap) so
+		// errors.Is(err, context.Canceled/DeadlineExceeded) and errors.As for
+		// *ErrRateLimited still hold for upstream classification.
+		return nil, &redactedError{
+			err: err,
+			msg: "marginalia: request failed: " + redactKeyFromString(err.Error(), redactKey),
 		}
-		return nil, fmt.Errorf("marginalia: request failed: %w", err)
 	}
 	if status == http.StatusTooManyRequests {
 		slog.Warn("marginalia: rate limited (429), skipping")
@@ -113,6 +137,31 @@ func SearchMarginaliaDirect(ctx context.Context, bc BrowserDoer, query, key stri
 	}
 
 	return ParseMarginaliaJSON(data)
+}
+
+// redactedError wraps an error with a sanitized message while preserving the
+// underlying error chain via Unwrap. This keeps errors.Is / errors.As working
+// (so handleSourceError can still classify context.Canceled, *ErrRateLimited,
+// etc.) while guaranteeing the key never appears in the error string.
+type redactedError struct {
+	err error
+	msg string
+}
+
+func (e *redactedError) Error() string { return e.msg }
+func (e *redactedError) Unwrap() error { return e.err }
+
+// redactKeyFromString replaces both the raw and the url.PathEscape'd form of
+// key with "[redacted]" in s. If key is empty, s is returned unchanged.
+func redactKeyFromString(s, key string) string {
+	if key == "" {
+		return s
+	}
+	s = strings.ReplaceAll(s, key, "[redacted]")
+	if escaped := url.PathEscape(key); escaped != key {
+		s = strings.ReplaceAll(s, escaped, "[redacted]")
+	}
+	return s
 }
 
 // ParseMarginaliaJSON decodes Marginalia public API JSON into sources.Result slice.
@@ -144,6 +193,26 @@ func ParseMarginaliaJSON(data []byte) ([]sources.Result, error) {
 	return results, nil
 }
 
+// MarginaliaBudgetGate is the per-call quota gate consulted by runMarginalia
+// before the Marginalia HTTP request is issued. Acquire returns true if the
+// call is permitted (and records the spend), or false if the budget is
+// exhausted or unavailable.
+//
+// Fail-closed contract (mirrors the Brave API Redis cap in the consuming repo):
+// when the gate cannot count — e.g. the backing store (Redis) is down, the
+// client is nil, or the counter is unreadable — Acquire MUST return false. An
+// outage must never amplify spend. Do not invert this to fail-open.
+//
+// The default in-memory implementation is *MarginaliaBudget (resets on process
+// restart, limit = defaultMarginaliaDailyBudget). A restart-surviving
+// implementation (Redis-backed, UTC calendar day) is injected by the consuming
+// repo at composition time — see the report for exactly what the consuming repo
+// must provide. When nothing is injected, the package-level default
+// (defaultMarginaliaBudget) is used so the courtesy quota is still protected.
+type MarginaliaBudgetGate interface {
+	Acquire() bool
+}
+
 // MarginaliaBudget is a self-imposed per-calendar-day query cap for the
 // Marginalia source. The maintainer granted a personal non-commercial key on
 // an expectation of 50–100 queries/day; the fleet's other direct sources run
@@ -156,14 +225,17 @@ func ParseMarginaliaJSON(data []byte) ([]sources.Result, error) {
 // rolling 24h window) prevents a burst at a local-TZ midnight from consuming
 // 2× the budget across the boundary.
 //
-// Restart behaviour: the counter is in-memory and resets to the full limit on
-// every process restart. Worst-case daily spend = limit × (restarts+1). With
-// the default limit of 80 and a bad day of N restarts, that is 80×(N+1)
-// queries — still far below the other sources' ~1400/day but above the 100
-// promised; the operator controls deploy frequency and may lower the limit.
-// The counter is NOT persisted: persisting would require a store dependency
-// (Redis via go-kit/ratelimit.SlidingWindow) that this source does not
-// otherwise carry, which is disproportionate for a courtesy quota.
+// Restart behaviour: the in-memory counter resets to the full limit on every
+// process restart. Worst-case daily spend = limit × (restarts+1). With the
+// default limit of 80 and a bad day of N restarts, that is 80×(N+1) queries —
+// still far below the other sources' ~1400/day but above the 100 promised.
+// This repo does NOT carry a Redis dependency for one source; instead the
+// budget is exposed as the MarginaliaBudgetGate interface so the consuming repo
+// can inject a restart-surviving Redis-backed gate at composition time (same
+// shape as internal/engine/brave_api_cap.go). When a persistent gate is
+// injected, the default of 80 is the per-calendar-day cap that survives
+// restarts — no need to lower it. When nothing is injected, the in-memory
+// default applies and the operator controls deploy frequency.
 //
 // Acquire is non-blocking: when the budget is exhausted it returns false
 // promptly so the source sheds load rather than queueing. The remaining budget
