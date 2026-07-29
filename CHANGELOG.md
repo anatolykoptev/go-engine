@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.52.2](https://github.com/anatolykoptev/go-engine/compare/v1.52.1...v1.52.2) (2026-07-29)
+
+
+### Fixed
+
+* migrate ox-browser fallback off deprecated /fetch-smart to raw /fetch ([#79](https://github.com/anatolykoptev/go-engine/issues/79)) ([6395037](https://github.com/anatolykoptev/go-engine/commit/639503740db612332ff4e41d46f7c96b217002a1))
+
 ## [1.52.1](https://github.com/anatolykoptev/go-engine/compare/v1.52.0...v1.52.1) (2026-07-26)
 
 
