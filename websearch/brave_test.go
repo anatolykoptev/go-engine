@@ -86,10 +86,10 @@ func TestBrave_RateLimitBody(t *testing.T) {
 
 // TestBrave_RateLimitBody_I18nFalsePositive verifies that "captcha" appearing
 // in Brave's i18n translation JSON (e.g. "Switch to traditional captcha":"...")
-// does NOT trigger isBraveRateLimited — a false positive that blocks valid
+// does NOT trigger IsBraveRateLimited — a false positive that blocks valid
 // result pages fetched via ox-browser /fetch.
 //
-// Falsification: revert isBraveRateLimited to plain bytes.Contains(lower, "captcha")
+// Falsification: revert IsBraveRateLimited to plain bytes.Contains(lower, "captcha")
 // → this test goes RED (i18n body treated as rate-limited).
 func TestBrave_RateLimitBody_I18nFalsePositive(t *testing.T) {
 	// Simulates a real Brave SERP with i18n translations containing "captcha"

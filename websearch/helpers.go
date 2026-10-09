@@ -69,8 +69,8 @@ func ChromeHeaders() map[string]string {
 	return ChromeHeadersFor(nil)
 }
 
-// isDDGRateLimited checks whether the DDG response body indicates CAPTCHA.
-func isDDGRateLimited(body []byte) bool {
+// IsDDGRateLimited checks whether the DDG response body indicates CAPTCHA.
+func IsDDGRateLimited(body []byte) bool {
 	low := bytes.ToLower(body)
 	for _, marker := range [][]byte{
 		[]byte("please try again"),
