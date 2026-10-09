@@ -85,7 +85,7 @@ func (b *Brave) Search(ctx context.Context, query string, opts SearchOpts) ([]Re
 	if status != http.StatusOK {
 		return nil, fmt.Errorf("brave status %d", status)
 	}
-	if isBraveRateLimited(data) {
+	if IsBraveRateLimited(data) {
 		return nil, &ErrRateLimited{Engine: "brave"}
 	}
 
@@ -130,12 +130,12 @@ func ParseBraveHTML(data []byte) ([]Result, error) {
 	return results, nil
 }
 
-// isBraveRateLimited checks if Brave blocked the request.
+// IsBraveRateLimited checks if Brave blocked the request.
 // Context-aware: "captcha" appears in Brave's i18n translation JSON
 // (e.g. "Switch to traditional captcha":"Switch to traditional CAPTCHA") even
 // on normal result pages. We distinguish i18n context (key":"value) from a
 // real captcha page where "captcha" appears in plain HTML text.
-func isBraveRateLimited(body []byte) bool {
+func IsBraveRateLimited(body []byte) bool {
 	lower := bytes.ToLower(body)
 
 	// Strong markers — always indicate rate limiting

@@ -146,9 +146,9 @@ func TestIsDDGRateLimited(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := isDDGRateLimited([]byte(tt.body))
+			got := IsDDGRateLimited([]byte(tt.body))
 			if got != tt.want {
-				t.Errorf("isDDGRateLimited() = %v, want %v", got, tt.want)
+				t.Errorf("IsDDGRateLimited() = %v, want %v", got, tt.want)
 			}
 		})
 	}

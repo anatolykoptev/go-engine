@@ -443,6 +443,12 @@ func runOxDDG(ctx context.Context, cfg DirectConfig, query string) ([]sources.Re
 		return nil, "fail"
 	}
 	if len(results) == 0 {
+		// A 200+parseable page with zero results is ambiguous: genuine empty
+		// SERP vs DDG serving its anomaly/captcha variant to the escalated
+		// profile. Classify so "empty" means a real SERP with nothing found.
+		if isDDGRateLimited([]byte(html)) {
+			return nil, "captcha"
+		}
 		return nil, "empty"
 	}
 	return results, "ok"
@@ -464,6 +470,9 @@ func runOxBrave(ctx context.Context, cfg DirectConfig, query string) ([]sources.
 		return nil, "fail"
 	}
 	if len(results) == 0 {
+		if websearch.IsBraveRateLimited([]byte(html)) {
+			return nil, "captcha"
+		}
 		return nil, "empty"
 	}
 	return results, "ok"
@@ -486,6 +495,13 @@ func runOxBing(ctx context.Context, cfg DirectConfig, query string) ([]sources.R
 		return nil, "fail"
 	}
 	if len(results) == 0 {
+		// #317: a 200+parseable page with zero results is ambiguous — genuine
+		// empty SERP vs Bing serving its "unusual traffic" gate to the
+		// escalated profile (escalation fires exactly when the engine is
+		// already hostile). Classify so "empty" means a real SERP.
+		if websearch.IsBingRateLimited([]byte(html)) {
+			return nil, "captcha"
+		}
 		return nil, "empty"
 	}
 	return results, "ok"

@@ -80,7 +80,7 @@ func (b *Bing) Search(ctx context.Context, query string, opts SearchOpts) ([]Res
 	if status != http.StatusOK {
 		return nil, fmt.Errorf("bing status %d", status)
 	}
-	if isBingRateLimited(data) {
+	if IsBingRateLimited(data) {
 		return nil, &ErrRateLimited{Engine: "bing"}
 	}
 
@@ -207,8 +207,8 @@ func bingUnwrapURL(rawURL string) string {
 	return string(decoded)
 }
 
-// isBingRateLimited checks if Bing blocked the request.
-func isBingRateLimited(body []byte) bool {
+// IsBingRateLimited checks if Bing blocked the request.
+func IsBingRateLimited(body []byte) bool {
 	lower := bytes.ToLower(body)
 	markers := [][]byte{
 		[]byte("captcha"),

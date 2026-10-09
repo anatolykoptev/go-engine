@@ -122,7 +122,7 @@ func (d *DDG) searchHTML(ctx context.Context, query, region, timeRange string) (
 	if status != http.StatusOK {
 		return nil, fmt.Errorf("ddg html status %d", status)
 	}
-	if isDDGRateLimited(data) {
+	if IsDDGRateLimited(data) {
 		return nil, &ErrRateLimited{Engine: "ddg"}
 	}
 
