@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.54.0](https://github.com/anatolykoptev/go-engine/compare/v1.53.2...v1.54.0) (2026-10-09)
+
+
+### Added
+
+* **pipeline:** learnings fields on SearchOutput (covered_aspects, iterated_queries) ([#91](https://github.com/anatolykoptev/go-engine/issues/91)) ([fc50e46](https://github.com/anatolykoptev/go-engine/commit/fc50e464d84a64fd7a856742c22e6c6ca05b702f))
+
 ## [1.53.2](https://github.com/anatolykoptev/go-engine/compare/v1.53.1...v1.53.2) (2026-10-09)
 
 
