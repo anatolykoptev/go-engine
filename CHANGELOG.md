@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.53.1](https://github.com/anatolykoptev/go-engine/compare/v1.53.0...v1.53.1) (2026-10-09)
+
+
+### Fixed
+
+* drop manual go_search_ prefix from metric constants ([#87](https://github.com/anatolykoptev/go-engine/issues/87)) ([efda53e](https://github.com/anatolykoptev/go-engine/commit/efda53eb6ac927001f336ad58b042b36cc84ebd6))
+
 ## [1.53.0](https://github.com/anatolykoptev/go-engine/compare/v1.52.2...v1.53.0) (2026-07-29)
 
 
