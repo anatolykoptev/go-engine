@@ -110,7 +110,7 @@ func TestSearchBraveAPI_ParsesResults(t *testing.T) {
 
 	// Verify ok metric was recorded.
 	snap := m.Snapshot()
-	okKey := "go_search_source_result_total{source=brave_api,outcome=ok}"
+	okKey := "source_result_total{source=brave_api,outcome=ok}"
 	if snap[okKey] != 1 {
 		t.Errorf("expected ok metric=1, got %d (snap=%v)", snap[okKey], snap)
 	}
@@ -133,7 +133,7 @@ func TestSearchBraveAPI_HTTP429(t *testing.T) {
 		t.Errorf("expected nil results on 429")
 	}
 	snap := m.Snapshot()
-	failKey := "go_search_source_result_total{source=brave_api,outcome=fail}"
+	failKey := "source_result_total{source=brave_api,outcome=fail}"
 	if snap[failKey] == 0 {
 		t.Errorf("expected fail metric to be incremented on 429")
 	}
@@ -157,7 +157,7 @@ func TestSearchBraveAPI_MalformedJSON(t *testing.T) {
 		t.Errorf("expected nil results on malformed JSON")
 	}
 	snap := m.Snapshot()
-	failKey := "go_search_source_result_total{source=brave_api,outcome=fail}"
+	failKey := "source_result_total{source=brave_api,outcome=fail}"
 	if snap[failKey] == 0 {
 		t.Errorf("expected fail metric to be incremented on malformed JSON")
 	}
@@ -175,12 +175,12 @@ func TestSearchBraveAPI_MetricLabel(t *testing.T) {
 	_, _ = SearchBraveAPI(context.Background(), "key", "query", m)
 
 	snap := m.Snapshot()
-	braveAPIKey := "go_search_source_result_total{source=brave_api,outcome=fail}"
+	braveAPIKey := "source_result_total{source=brave_api,outcome=fail}"
 	if snap[braveAPIKey] == 0 {
 		t.Errorf("expected brave_api metric, not found: %v", snap)
 	}
 	// Scraper label "brave" must NOT appear.
-	braveScraperKey := "go_search_source_result_total{source=brave,outcome=fail}"
+	braveScraperKey := "source_result_total{source=brave,outcome=fail}"
 	if snap[braveScraperKey] != 0 {
 		t.Errorf("unexpected brave scraper metric found: %v", snap)
 	}

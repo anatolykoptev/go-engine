@@ -265,7 +265,7 @@ func runSourceWithTimeout(srcCtx context.Context, label string, fn func(context.
 // metricSourceResult is the per-source fan-out outcome counter. Encoded as
 // name{source=<label>,outcome=ok|empty|captcha|timeout|blocked|fail|shed} so the
 // go-kit/metrics Prometheus bridge surfaces it as
-// go_search_source_result_total{source="yep",outcome="fail"}.
+// source_result_total{source="yep",outcome="fail"}.
 //
 // Outcomes:
 //   - ok      — source returned ≥1 result
@@ -292,7 +292,7 @@ func runSourceWithTimeout(srcCtx context.Context, label string, fn func(context.
 // This counter makes a per-source failure rate alertable. The "empty" outcome
 // additionally surfaces silent blocks where the source appears healthy (no error)
 // but consistently returns zero usable results.
-const metricSourceResult = "go_search_source_result_total"
+const metricSourceResult = "source_result_total"
 
 // recordSourceResult increments the per-source outcome counter. Nil-safe.
 func recordSourceResult(m *metrics.Registry, source, outcome string) {
@@ -303,14 +303,15 @@ func recordSourceResult(m *metrics.Registry, source, outcome string) {
 }
 
 // metricOxEscalation is the ox-browser captcha-escalation tier outcome counter (RED signal).
-// Encoded as go_search_ox_escalation_total{engine=<label>,outcome=ok|empty|fail|skipped}
-const metricOxEscalation = "go_search_ox_escalation_total"
+// Encoded as ox_escalation_total{engine=<label>,outcome=ok|empty|fail|skipped}
+const metricOxEscalation = "ox_escalation_total"
 
 // metricOxInflight is the ox-browser escalation concurrency gauge (USE signal — semaphore depth).
-// Encoded as go_search_ox_browser_inflight; carries the go_search_ prefix to match the sibling
-// counters and stay grouped in go-search dashboards/alerts (the ox-browser /fetch server in
-// go-wowa exposes its own metrics — a bare name would alias against them under PromQL).
-const metricOxInflight = "go_search_ox_browser_inflight"
+// Encoded as ox_browser_inflight. The registry namespace (e.g. "gosearch")
+// supplies the prefix at exposition time, so consumers get
+// gosearch_ox_browser_inflight — distinct from the identically-named series
+// the ox-browser /fetch server in go-wowa exports under its own namespace.
+const metricOxInflight = "ox_browser_inflight"
 
 // recordOxEscalation increments the ox-browser escalation outcome counter. Nil-safe.
 func recordOxEscalation(m *metrics.Registry, engine, outcome string) {
@@ -546,7 +547,7 @@ func collectResults(ch <-chan directResult, m *metrics.Registry, earlyAt int, ca
 		stats.Attempted++
 		if m != nil {
 			m.ObserveSeconds(
-				kitmetrics.Label("go_search_search_source_duration_seconds", "source", r.label),
+				kitmetrics.Label("search_source_duration_seconds", "source", r.label),
 				r.dur,
 			)
 		}

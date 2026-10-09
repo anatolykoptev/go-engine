@@ -25,13 +25,13 @@ func TestRecordSourceResult(t *testing.T) {
 
 	snap := m.Snapshot()
 
-	if got := snap["go_search_source_result_total{source=yep,outcome=fail}"]; got != 2 {
+	if got := snap["source_result_total{source=yep,outcome=fail}"]; got != 2 {
 		t.Errorf("yep fail = %d, want 2 (snapshot: %v)", got, snap)
 	}
-	if got := snap["go_search_source_result_total{source=yep,outcome=ok}"]; got != 1 {
+	if got := snap["source_result_total{source=yep,outcome=ok}"]; got != 1 {
 		t.Errorf("yep ok = %d, want 1", got)
 	}
-	if got := snap["go_search_source_result_total{source=yandex,outcome=ok}"]; got != 1 {
+	if got := snap["source_result_total{source=yandex,outcome=ok}"]; got != 1 {
 		t.Errorf("yandex ok = %d, want 1", got)
 	}
 }

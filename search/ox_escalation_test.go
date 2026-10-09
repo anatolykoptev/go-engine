@@ -207,7 +207,7 @@ func TestOxEscalation_EscalatesDDG(t *testing.T) {
 
 	// Metric emitted for successful escalation.
 	snap := cfg.Metrics.Snapshot()
-	okKey := "go_search_ox_escalation_total{engine=ddg,outcome=ok}"
+	okKey := "ox_escalation_total{engine=ddg,outcome=ok}"
 	if snap[okKey] != 1 {
 		t.Errorf("metric %s = %d, want 1 (snapshot: %v)", okKey, snap[okKey], snap)
 	}
@@ -253,7 +253,7 @@ func TestOxEscalation_EscalatesBrave(t *testing.T) {
 	}
 
 	snap := cfg.Metrics.Snapshot()
-	okKey := "go_search_ox_escalation_total{engine=brave,outcome=ok}"
+	okKey := "ox_escalation_total{engine=brave,outcome=ok}"
 	if snap[okKey] != 1 {
 		t.Errorf("metric %s = %d, want 1 (snapshot: %v)", okKey, snap[okKey], snap)
 	}
@@ -367,7 +367,7 @@ func TestOxEscalation_FetchErrorRecordsFailMetric(t *testing.T) {
 	}
 
 	snap := m.Snapshot()
-	failKey := "go_search_ox_escalation_total{engine=ddg,outcome=fail}"
+	failKey := "ox_escalation_total{engine=ddg,outcome=fail}"
 	if snap[failKey] != 1 {
 		t.Errorf("metric %s = %d, want 1 (snapshot: %v)", failKey, snap[failKey], snap)
 	}
@@ -399,7 +399,7 @@ func TestOxEscalation_ParseEmptyRecordsEmptyMetric(t *testing.T) {
 	}
 
 	snap := m.Snapshot()
-	emptyKey := "go_search_ox_escalation_total{engine=ddg,outcome=empty}"
+	emptyKey := "ox_escalation_total{engine=ddg,outcome=empty}"
 	if snap[emptyKey] != 1 {
 		t.Errorf("metric %s = %d, want 1 (snapshot: %v)", emptyKey, snap[emptyKey], snap)
 	}
@@ -557,7 +557,7 @@ func TestOxEscalation_EscalatesBing(t *testing.T) {
 	}
 
 	snap := cfg.Metrics.Snapshot()
-	okKey := "go_search_ox_escalation_total{engine=bing,outcome=ok}"
+	okKey := "ox_escalation_total{engine=bing,outcome=ok}"
 	if snap[okKey] != 1 {
 		t.Errorf("metric %s = %d, want 1 (snapshot: %v)", okKey, snap[okKey], snap)
 	}
@@ -594,9 +594,9 @@ func TestOxEscalationMetric_Names(t *testing.T) {
 		key  string
 		want int64
 	}{
-		{"go_search_ox_escalation_total{engine=ddg,outcome=ok}", 1},
-		{"go_search_ox_escalation_total{engine=brave,outcome=empty}", 1},
-		{"go_search_ox_escalation_total{engine=ddg,outcome=skipped}", 1},
+		{"ox_escalation_total{engine=ddg,outcome=ok}", 1},
+		{"ox_escalation_total{engine=brave,outcome=empty}", 1},
+		{"ox_escalation_total{engine=ddg,outcome=skipped}", 1},
 	}
 	for _, tc := range cases {
 		if got := snap[tc.key]; got != tc.want {

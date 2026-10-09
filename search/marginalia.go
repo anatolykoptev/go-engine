@@ -32,11 +32,11 @@ const (
 	defaultMarginaliaDailyBudget = 80
 
 	// metricMarginaliaBudgetRemaining is the gauge exposing the remaining
-	// Marginalia queries for the current UTC calendar day. Follows the
-	// go_search_ prefix convention of the sibling fan-out metrics so it
-	// groups with them in go-search dashboards. Exhaustion is observable as
+	// Marginalia queries for the current UTC calendar day. The registry
+	// namespace supplies the prefix at exposition time so it groups with
+	// the sibling fan-out metrics in go-search dashboards. Exhaustion is observable as
 	// this gauge reaching 0, rather than inferred from an absence of results.
-	metricMarginaliaBudgetRemaining = "go_search_marginalia_budget_remaining"
+	metricMarginaliaBudgetRemaining = "marginalia_budget_remaining"
 
 	// marginaliaSourceURL is the link-back the operator promised the
 	// Marginalia maintainer in exchange for the personal key. Surfaced in
