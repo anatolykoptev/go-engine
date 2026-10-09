@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.53.2](https://github.com/anatolykoptev/go-engine/compare/v1.53.1...v1.53.2) (2026-10-09)
+
+
+### Fixed
+
+* classify gated SERPs as captcha on ox-escalation ([#317](https://github.com/anatolykoptev/go-engine/issues/317)) ([#89](https://github.com/anatolykoptev/go-engine/issues/89)) ([3b4aab7](https://github.com/anatolykoptev/go-engine/commit/3b4aab7671096e35ae116327a7fd5cf388dc59d5))
+
 ## [1.53.1](https://github.com/anatolykoptev/go-engine/compare/v1.53.0...v1.53.1) (2026-10-09)
 
 
