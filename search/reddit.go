@@ -40,7 +40,7 @@ func SearchRedditDirect(ctx context.Context, bc BrowserDoer, query string, m *me
 //
 // Note: success short-circuits before recordTierOutcome is called, so "ok"
 // is never emitted as an outcome label.
-const metricRedditTier = "reddit_tier_total"
+const metricRedditTier = "reddit_tier_total" // #nosec G101 -- metric name, not a credential
 
 // tierOutcomeLabel maps a tier exit error to a bounded outcome label for the
 // reddit_tier counter. nil means "tier produced zero results" (empty outcome).
