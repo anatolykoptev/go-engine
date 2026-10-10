@@ -9,6 +9,11 @@
 // markdown, which an HTML extractor silently mis-parses as empty/garbage with
 // a nil error (silent corruption). The /read llm-format path is consumed
 // separately by go-search's oxReadability branch (go-search#232).
+//
+// Auth: requests to the ox-browser origin carry X-Internal-Secret from the
+// INTERNAL_SERVICE_SECRET env var when it is set (go-kit svcauth). The header
+// is scoped to the ox-browser origin and stripped from redirects to any other
+// origin. Env unset → no header, behaviour unchanged (ox-browser#173).
 package fetch
 
 import (
@@ -21,6 +26,8 @@ import (
 	"log/slog"
 	"net/http"
 	"time"
+
+	"github.com/anatolykoptev/go-kit/svcauth"
 )
 
 const oxBrowserTimeout = 30 * time.Second
@@ -48,6 +55,8 @@ type oxFetchResponse struct {
 }
 
 // WithOxBrowser enables fallback to an ox-browser /fetch endpoint.
+// Requests to baseURL carry X-Internal-Secret from INTERNAL_SERVICE_SECRET
+// when set (scoped to that origin only, redirect-safe).
 func WithOxBrowser(baseURL string) Option {
 	return func(f *Fetcher) {
 		if baseURL != "" {
@@ -72,7 +81,15 @@ func (f *Fetcher) fetchViaOxBrowser(ctx context.Context, pageURL string) ([]byte
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{Timeout: oxBrowserTimeout + 5*time.Second}
+	// svcauth reads INTERNAL_SERVICE_SECRET per call and routes
+	// X-Internal-Secret only to the ox-browser origin (stripped elsewhere,
+	// redirect-safe). nil base = http.DefaultTransport, preserving today's
+	// implicit transport; empty env → no header.
+	transport, err := svcauth.FromEnv(nil, f.oxBrowserURL)
+	if err != nil {
+		return nil, fmt.Errorf("ox-browser svcauth: %w", err)
+	}
+	client := &http.Client{Timeout: oxBrowserTimeout + 5*time.Second, Transport: transport}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("ox-browser call: %w", err)
