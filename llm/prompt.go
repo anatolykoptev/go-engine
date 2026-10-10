@@ -21,8 +21,8 @@ Respond with valid JSON only (no markdown, no ` + "`" + `json` + "`" + ` block):
 {
   "answer": "2-3 sentence plain-text summary. No markdown. No citation markers.",
   "facts": [
-    {"point": "Specific fact as a complete sentence.", "sources": [1, 2]},
-    {"point": "Another specific fact with a number or detail.", "sources": [3]}
+    {"point": "Specific fact as a complete sentence.", "sources": [1, 2], "quote": "verbatim span from source 1 or 2"},
+    {"point": "Another specific fact with a number or detail.", "sources": [3], "quote": "verbatim span from source 3"}
   ]
 }
 
@@ -30,6 +30,7 @@ Rules:
 - answer: plain text, 2-3 sentences, NO markdown (no **, ##, -, *), NO [N] citation markers
 - facts: 4-8 key points, each a complete informative sentence, with 1-based source indices
 - facts should cover the most important, specific information (numbers, names, versions, commands)
+- quote: copied character-for-character from ONE of the cited sources, one sentence or less, containing every number that appears in point
 - Answer in the SAME LANGUAGE as the query
 - Do NOT invent information not present in sources
 - If sources conflict, include both versions as separate fact items
@@ -51,8 +52,8 @@ Respond with valid JSON only (no markdown, no ` + "`" + `json` + "`" + ` block):
 {
   "answer": "3-5 sentence plain-text summary covering the main points. No markdown. No citation markers.",
   "facts": [
-    {"point": "Specific fact with detail, number, or command.", "sources": [1, 2]},
-    {"point": "Another distinct fact.", "sources": [3]}
+    {"point": "Specific fact with detail, number, or command.", "sources": [1, 2], "quote": "verbatim span from source 1 or 2"},
+    {"point": "Another distinct fact.", "sources": [3], "quote": "verbatim span from source 3"}
   ]
 }
 
@@ -60,7 +61,8 @@ Requirements:
 - answer: plain text, 3-5 sentences, NO markdown, NO [N] citation markers
 - facts: 8-15 key points covering all important details from sources
 - Each fact: one complete sentence with specific information (versions, numbers, names, code snippets)
-- Include code examples as fact points: {"point": "Use 'go build -a' to force rebuild.", "sources": [2]}
+- quote: copied character-for-character from ONE of the cited sources, one sentence or less, containing every number that appears in point
+- Include code examples as fact points: {"point": "Use 'go build -a' to force rebuild.", "sources": [2], "quote": "run 'go build -a' to force a rebuild"}
 - sources array: 1-based indices into the provided Sources list
 - Answer in the SAME LANGUAGE as the query
 - Do NOT invent information — only use what is in the sources

@@ -17,11 +17,40 @@ type StructuredOutput struct {
 	Facts  []FactItem `json:"facts,omitempty"`
 }
 
-// FactItem is a single verified fact with explicit source indices.
+// FactItem is a single fact proposed by the LLM with explicit 1-based source
+// indices. Summarize* methods deterministically verify Quote against the text
+// the model was shown for the cited sources and annotate the result:
+//
+//   - Status "verified" — Quote was found in at least one cited source's text
+//     and every number in Point also appears in Quote.
+//   - Status "held" — a check failed; HeldReason names which one.
+//   - Status "" — never checked. FactItems built outside the Summarize* parse
+//     path (e.g. go-search's extractive builder) stay empty by contract; empty
+//     is not a failure.
+//
+// Verification annotates, never drops, and never gates the Answer prose.
 type FactItem struct {
-	Point   string `json:"point"`   // complete sentence, no markdown
-	Sources []int  `json:"sources"` // 1-based indices into Sources array
+	Point      string `json:"point"`                 // complete sentence, no markdown
+	Sources    []int  `json:"sources"`               // 1-based indices into Sources array
+	Quote      string `json:"quote,omitempty"`       // verbatim span from a cited source
+	Status     string `json:"status,omitempty"`      // FactStatus* value; empty = not checked
+	HeldReason string `json:"held_reason,omitempty"` // HeldReason* value; set only when held
 }
+
+// Fact verification statuses.
+const (
+	FactStatusVerified = "verified"
+	FactStatusHeld     = "held"
+)
+
+// Fact hold reasons, in the order checks run (first failure wins).
+const (
+	HeldNoQuote          = "no_quote"            // quote absent or whitespace-only
+	HeldBadSourceIndex   = "bad_source_index"    // every cited index outside 1..len(results)
+	HeldQuoteTooShort    = "quote_too_short"     // normalized quote under minFactQuoteLen
+	HeldQuoteNotInSource = "quote_not_in_source" // quote not found in any cited haystack
+	HeldNumberNotInQuote = "number_not_in_quote" // a number in point is missing from quote
+)
 
 // TypeInstructions maps query types to LLM formatting instructions.
 var TypeInstructions = map[text.QueryType]string{
@@ -104,14 +133,7 @@ func (c *Client) SummarizeWithInstruction(ctx context.Context, query, instructio
 		return nil, err
 	}
 
-	var out StructuredOutput
-	if err := json.Unmarshal([]byte(raw), &out); err != nil {
-		if answer := ExtractJSONAnswer(raw); answer != "" {
-			return &StructuredOutput{Answer: answer}, nil
-		}
-		return &StructuredOutput{Answer: raw}, nil
-	}
-	return &out, nil
+	return c.parseStructuredOutput(raw, results, contents), nil
 }
 
 // SummarizeDeep summarizes search results with exhaustive fact extraction.
@@ -128,14 +150,7 @@ func (c *Client) SummarizeDeep(ctx context.Context, query, instruction string, m
 		return nil, err
 	}
 
-	var out StructuredOutput
-	if err := json.Unmarshal([]byte(raw), &out); err != nil {
-		if answer := ExtractJSONAnswer(raw); answer != "" {
-			return &StructuredOutput{Answer: answer}, nil
-		}
-		return &StructuredOutput{Answer: raw}, nil
-	}
-	return &out, nil
+	return c.parseStructuredOutput(raw, results, contents), nil
 }
 
 // SummarizeOpts configures a summarization call.
@@ -179,14 +194,7 @@ func (c *Client) SummarizeWithOpts(ctx context.Context, opts SummarizeOpts, resu
 		return nil, err
 	}
 
-	var out StructuredOutput
-	if err := json.Unmarshal([]byte(raw), &out); err != nil {
-		if answer := ExtractJSONAnswer(raw); answer != "" {
-			return &StructuredOutput{Answer: answer}, nil
-		}
-		return &StructuredOutput{Answer: raw}, nil
-	}
-	return &out, nil
+	return c.parseStructuredOutput(raw, results, contents), nil
 }
 
 // SummarizeDeepWithOpts summarizes with exhaustive fact extraction and output cap.
@@ -212,14 +220,7 @@ func (c *Client) SummarizeDeepWithOpts(ctx context.Context, opts SummarizeOpts, 
 		return nil, err
 	}
 
-	var out StructuredOutput
-	if err := json.Unmarshal([]byte(raw), &out); err != nil {
-		if answer := ExtractJSONAnswer(raw); answer != "" {
-			return &StructuredOutput{Answer: answer}, nil
-		}
-		return &StructuredOutput{Answer: raw}, nil
-	}
-	return &out, nil
+	return c.parseStructuredOutput(raw, results, contents), nil
 }
 
 // SummarizeToJSON builds an LLM prompt from search results and parses the response as JSON into T.
@@ -272,14 +273,7 @@ func (c *Client) SummarizeWithTier(ctx context.Context, opts SummarizeOpts, resu
 	if err != nil {
 		return nil, err
 	}
-	var out StructuredOutput
-	if err := json.Unmarshal([]byte(raw), &out); err != nil {
-		if answer := ExtractJSONAnswer(raw); answer != "" {
-			return &StructuredOutput{Answer: answer}, nil
-		}
-		return &StructuredOutput{Answer: raw}, nil
-	}
-	return &out, nil
+	return c.parseStructuredOutput(raw, results, contents), nil
 }
 
 // ExtractJSONAnswer extracts the "answer" field from malformed JSON
