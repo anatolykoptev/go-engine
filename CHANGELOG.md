@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.55.0](https://github.com/anatolykoptev/go-engine/compare/v1.54.0...v1.55.0) (2026-10-10)
+
+
+### Added
+
+* **oxbrowser:** send X-Internal-Secret to ox-browser via go-kit svcauth (ox-browser[#173](https://github.com/anatolykoptev/go-engine/issues/173)) ([#93](https://github.com/anatolykoptev/go-engine/issues/93)) ([588f435](https://github.com/anatolykoptev/go-engine/commit/588f435fdfbe2a8c540bb29bf0d11a408496d6d4))
+
 ## [1.54.0](https://github.com/anatolykoptev/go-engine/compare/v1.53.2...v1.54.0) (2026-10-09)
 
 
