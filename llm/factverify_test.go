@@ -293,6 +293,136 @@ func TestFacts_NumberLeniency(t *testing.T) {
 	}
 }
 
+// factResponse marshals a single-fact LLM response for the given point and
+// quote, so test tables can carry Unicode escapes safely.
+func factResponse(t *testing.T, point, quote string) string {
+	t.Helper()
+	b, err := json.Marshal(map[string]any{
+		"answer": "A.",
+		"facts":  []map[string]any{{"point": point, "sources": []int{1}, "quote": quote}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+// TestFacts_NumberRuleDistinctValues: the number rule must HOLD — not
+// verify — when the point's number is a different value than every number
+// the quote carries. A bare digit-concatenation would equate each pair;
+// a false verify is the silent failure this rule exists to catch.
+func TestFacts_NumberRuleDistinctValues(t *testing.T) {
+	cases := []struct {
+		name   string
+		point  string
+		quote  string
+		source string
+	}{
+		{"decimal_vs_integer", "Inflation reached 1.5 percent.",
+			"inflation reached 15 percent last quarter",
+			"The report said inflation reached 15 percent last quarter, officials confirmed."},
+		{"negative_vs_positive", "Temperatures fell to -15 degrees.",
+			"temperatures rose to 15 degrees this winter",
+			"Forecasters said temperatures rose to 15 degrees this winter in the region."},
+		{"integer_vs_version", "Downloads hit 1234 units.",
+			"the package shipped version 1.2.3.4 for users",
+			"Maintainers said the package shipped version 1.2.3.4 for users on Monday."},
+		{"integer_vs_decimal_comma", "The fee is 12 euros.",
+			"the fee is 1,2 euros per transaction",
+			"The bank said the fee is 1,2 euros per transaction for clients."},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c, done := newTestClient(t, factResponse(t, tc.point, tc.quote))
+			defer done()
+			results := []sources.Result{{Title: "T", URL: "http://a.com"}}
+			contents := map[string]string{"http://a.com": tc.source}
+			out, err := c.SummarizeWithTier(context.Background(),
+				SummarizeOpts{Query: "q", TotalBudget: 2000, CharsPerToken: 4.0},
+				results, contents, rankedWeights, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(out.Facts) != 1 {
+				t.Fatalf("facts = %d, want 1", len(out.Facts))
+			}
+			f := out.Facts[0]
+			if f.Status != FactStatusHeld || f.HeldReason != HeldNumberNotInQuote {
+				t.Errorf("status=%q reason=%q, want %s/%s", f.Status, f.HeldReason, FactStatusHeld, HeldNumberNotInQuote)
+			}
+		})
+	}
+}
+
+// TestFacts_NumberRuleValueEquivalence: the same number written with
+// different separators must still verify — ru decimal comma, en/de/ru
+// thousands groupings, Unicode minus — plus non-ASCII digits (Nd → ASCII)
+// and decomposed Unicode (NFC). Ambiguity resolves toward matching only
+// between equal values.
+func TestFacts_NumberRuleValueEquivalence(t *testing.T) {
+	cases := []struct {
+		name   string
+		point  string
+		quote  string
+		source string
+	}{
+		{"ru_decimal_comma", "Sales grew 3,5 times.",
+			"sales grew 3.5 times in q3",
+			"The filing said sales grew 3.5 times in Q3, executives noted."},
+		{"en_thousands", "Sales reached 1234 units.",
+			"sales reached 1,234 units this quarter",
+			"The filing said sales reached 1,234 units this quarter overall."},
+		{"space_thousands", "Sales reached 1234 units.",
+			"sales reached 1 234 units this quarter",
+			"The filing said sales reached 1 234 units this quarter overall."},
+		{"nbsp_thousands", "Sales reached 1234 units.",
+			"sales reached 1 234 units this quarter",
+			"The filing said sales reached 1 234 units this quarter overall."},
+		{"space_millions", "The fund reached 1 500 000 euros.",
+			"the fund reached 1500000 euros last year",
+			"The audit said the fund reached 1500000 euros last year in total."},
+		{"ambiguous_dot_vs_comma", "The index hit 1.234 points.",
+			"the index hit 1,234 points yesterday",
+			"The analyst said the index hit 1,234 points yesterday at close."},
+		{"de_dot_thousands", "Sales hit 1234 units.",
+			"the counter showed 1.234 on the display today",
+			"Technicians said the counter showed 1.234 on the display today at noon."},
+		{"unicode_minus", "Temperatures fell to -15 degrees.",
+			"temperatures fell to −15 degrees this winter",
+			"Forecasters said temperatures fell to −15 degrees this winter in the region."},
+		{"fullwidth_digit", "Sales grew ３.5 times.",
+			"sales grew 3.5 times in q3",
+			"The filing said sales grew 3.5 times in Q3, executives noted."},
+		{"arabic_indic_digit", "Sales grew ٣.5 times.",
+			"sales grew 3.5 times in q3",
+			"The filing said sales grew 3.5 times in Q3, executives noted."},
+		{"decomposed_yo", "Объём продаж вырос на 15%.",
+			"объём продаж вырос на 15% за год",
+			"По данным агентства, объём продаж вырос на 15% за год, сообщается."},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c, done := newTestClient(t, factResponse(t, tc.point, tc.quote))
+			defer done()
+			results := []sources.Result{{Title: "T", URL: "http://a.com"}}
+			contents := map[string]string{"http://a.com": tc.source}
+			out, err := c.SummarizeWithTier(context.Background(),
+				SummarizeOpts{Query: "q", TotalBudget: 2000, CharsPerToken: 4.0},
+				results, contents, rankedWeights, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(out.Facts) != 1 {
+				t.Fatalf("facts = %d, want 1", len(out.Facts))
+			}
+			f := out.Facts[0]
+			if f.Status != FactStatusVerified || f.HeldReason != "" {
+				t.Errorf("status=%q reason=%q, want %s/<empty>", f.Status, f.HeldReason, FactStatusVerified)
+			}
+		})
+	}
+}
+
 // TestFacts_PromptRequestsQuote is the F6 journey: every Summarize* method's
 // prompt must ask the model for a quote.
 func TestFacts_PromptRequestsQuote(t *testing.T) {

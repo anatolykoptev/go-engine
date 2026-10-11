@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"regexp"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/anatolykoptev/go-engine/sources"
 	kitmetrics "github.com/anatolykoptev/go-kit/metrics"
+	"golang.org/x/text/unicode/norm"
 )
 
 // minFactQuoteLen is the minimum normalized quote length in runes. Below ~20
@@ -28,7 +30,12 @@ const (
 // Space-separated groups must be exactly 3 digits and word-bounded, so
 // "1 234 567" is one number but "3 5" and "2024 5678" stay separate.
 // NBSP/thin-space variants reach this as plain spaces post-normalization.
+// A leading minus is attached by factNumberTokens, not by the regexp.
 var factNumberRe = regexp.MustCompile(`[0-9]+(?:[.,][0-9]+)*\b(?: [0-9]{3}\b)*(?:[.,][0-9]+)?`)
+
+// thousandsGroupLen is the digit count a separator group must have to read
+// as a thousands separator (en "1,234", de/ru "1.234", ru "1 234").
+const thousandsGroupLen = 3
 
 // parseStructuredOutput parses raw LLM output into StructuredOutput, then
 // verifies every fact's quote against the text the model was shown for its
@@ -47,13 +54,16 @@ func (c *Client) parseStructuredOutput(raw string, results []sources.Result, con
 	return &out
 }
 
-// verifyFacts checks each fact's quote against the haystack the model was
-// shown for each cited source: the FULL contents[url] value when fetched
-// content exists, else the result snippet — mirroring
-// BuildSourcesText/BuildSourcesTextWeighted, which send fetched content for
-// top-ranked sources and only the snippet for the rest. A fact verifies when
-// its quote is found in the haystack of ANY cited index. Facts are annotated
-// in place, in order, and counted by outcome.
+// verifyFacts checks each fact's quote against the text of each cited
+// source: the FULL contents[url] value when fetched content exists, else
+// the result snippet. This mirrors BuildSourcesText/BuildSourcesTextWeighted
+// only in the CHOICE of source text — fetched content for a source, else
+// its snippet — not in token truncation: the haystack is the full text
+// whether or not it fit the model's prompt budget. That is deliberate: a
+// verbatim quote that exists in the source supports the fact regardless of
+// whether the model was shown that part. A fact verifies when its quote is
+// found in the haystack of ANY cited index. Facts are annotated in place,
+// in order, and counted by outcome.
 func (c *Client) verifyFacts(facts []FactItem, results []sources.Result, contents map[string]string) {
 	if len(facts) == 0 {
 		return
@@ -125,13 +135,19 @@ func verifyFact(f *FactItem, numSources int, haystacks map[int]string) (string, 
 // NBSP/narrow-NBSP/thin space to a plain space (strings.Fields already
 // collapses every Unicode White_Space run), and trims.
 func normalizeFactText(s string) string {
+	s = norm.NFC.String(s)
 	s = strings.ToLower(s)
 	s = strings.Map(factNormalizeRune, s)
 	return strings.Join(strings.Fields(s), " ")
 }
 
 // factNormalizeRune maps one rune during normalization. Returning -1 deletes.
+// A Unicode decimal digit (category Nd — Arabic-Indic, full-width, …) maps
+// to its ASCII equivalent so the number rule sees "3" for "٣" and "３".
 func factNormalizeRune(r rune) rune {
+	if r > '9' && unicode.IsDigit(r) {
+		return '0' + ndDigitValue(r)
+	}
 	switch r {
 	case '‘', '’', '‚', '‛':
 		return '\''
@@ -149,18 +165,35 @@ func factNormalizeRune(r rune) rune {
 	return r
 }
 
+// ndDigitValue returns the numeric value of a Unicode decimal digit. Nd
+// digits are always encoded as ten contiguous runes 0-9, so the value is
+// the count of contiguous digit runes immediately preceding it, modulo 10
+// (an adjacent block's digits contribute whole tens — e.g. the five
+// mathematical digit blocks U+1D7CE–U+1D7FF). Call only when
+// unicode.IsDigit(r) holds — that is the membership test.
+func ndDigitValue(r rune) rune {
+	v := rune(0)
+	for unicode.IsDigit(r - v - 1) {
+		v++
+	}
+	return v % 10
+}
+
 // factNumbersCovered reports whether every number in point also appears in
-// quote. Comparison is deliberately lenient on separator ambiguity (ru "3,5"
-// decimal comma vs en "1,234" thousands): a number matches if ANY of its
-// forms — digits-only or decimal — equals a quote number's form. A false
-// hold is the failure we measure, so ambiguity resolves toward matching.
+// quote. Numbers compare by canonical VALUE (see numberForms): thousands
+// groupings are dropped, a . or , may read as a decimal mark, and a leading
+// minus is part of the value — so "1,234" equals "1234" but "1.5" never
+// equals "15" and "-15" never equals "15". Version-like tokens
+// ("1.2.3.4") match only their literal form. A false hold is the failure
+// we measure; a false verify is silent, so ambiguity resolves toward
+// matching only between equal values.
 func factNumbersCovered(point, quote string) bool {
-	need := factNumberRe.FindAllString(normalizeFactText(point), -1)
+	need := factNumberTokens(normalizeFactText(point))
 	if len(need) == 0 {
 		return true
 	}
 	have := make(map[string]bool, len(need))
-	for _, tok := range factNumberRe.FindAllString(normalizeFactText(quote), -1) {
+	for _, tok := range factNumberTokens(normalizeFactText(quote)) {
 		for _, form := range numberForms(tok) {
 			have[form] = true
 		}
@@ -180,34 +213,110 @@ func factNumbersCovered(point, quote string) bool {
 	return true
 }
 
-// numberForms returns the canonical forms a number token may represent:
-// all digits concatenated (thousands separators stripped), plus — when the
-// token contains a . or , separator — a decimal form keeping only the last
-// separator as the decimal mark. "3,5" → {"35","3.5"}, "1,234" →
-// {"1234","1.234"}, "1,234,567" → {"1234567","1234.567"}.
-func numberForms(token string) []string {
-	compact := strings.ReplaceAll(token, " ", "")
-	forms := []string{stripNonDigits(compact)}
-	last := strings.LastIndexAny(compact, ".,")
-	if last <= 0 || last == len(compact)-1 {
-		return forms
+// factNumberTokens extracts number tokens from normalized text. A "-"
+// directly before a token is its sign unless another digit precedes it:
+// "15-20" is a range (15 and 20), "to -15" is negative fifteen.
+func factNumberTokens(s string) []string {
+	matches := factNumberRe.FindAllStringIndex(s, -1)
+	toks := make([]string, 0, len(matches))
+	for _, m := range matches {
+		tok := s[m[0]:m[1]]
+		if m[0] > 0 && s[m[0]-1] == '-' && (m[0] == 1 || !isDigitByte(s[m[0]-2])) {
+			tok = "-" + tok
+		}
+		toks = append(toks, tok)
 	}
-	intPart := stripNonDigits(compact[:last])
-	fracPart := compact[last+1:]
-	if intPart != "" && fracPart != "" {
-		forms = append(forms, intPart+"."+fracPart)
+	return toks
+}
+
+func isDigitByte(b byte) bool { return b >= '0' && b <= '9' }
+
+// numberForms returns the canonical VALUES a number token may represent —
+// never a bare digit-concatenation. A separator followed by exactly
+// thousandsGroupLen digits may be a thousands separator (dropped in that
+// reading); the last . or , may read as a decimal mark (kept as "." in
+// that reading) when every earlier group is a valid thousands group. A
+// token that fits neither reading ("1.2.3.4", "v1.55.0") is a
+// version/identifier and yields only its literal form, which never equals
+// a plain number. Examples: "1,234" → {"1234","1.234"}, "1.5" → {"1.5"},
+// "1.2.3.4" → {"1.2.3.4"}, "-15" → {"-15"}.
+func numberForms(token string) []string {
+	sign, body := splitNumberSign(token)
+	groups, seps := splitNumberToken(body)
+	n := len(groups)
+	var forms []string
+	if n > 1 && allThreeDigit(groups[1:]) {
+		forms = append(forms, canonicalNumber(sign+strings.Join(groups, "")))
+	}
+	if n > 1 && seps[n-2] != ' ' && allThreeDigit(groups[1:n-1]) {
+		forms = append(forms, canonicalNumber(sign+strings.Join(groups[:n-1], "")+"."+groups[n-1]))
+	}
+	if forms == nil {
+		if n == 1 {
+			forms = []string{canonicalNumber(token)}
+		} else {
+			forms = []string{token} // version/identifier: literal form only
+		}
 	}
 	return forms
 }
 
-// stripNonDigits removes everything but ASCII digits.
-func stripNonDigits(s string) string {
-	var b strings.Builder
-	b.Grow(len(s))
-	for i := 0; i < len(s); i++ {
-		if s[i] >= '0' && s[i] <= '9' {
-			b.WriteByte(s[i])
+// splitNumberSign separates a token's leading minus from its body.
+func splitNumberSign(token string) (sign, body string) {
+	if strings.HasPrefix(token, "-") {
+		return "-", token[1:]
+	}
+	return "", token
+}
+
+// splitNumberToken splits a number token's body into its digit groups and
+// the separators between them: "1,234.56" → ["1","234","56"], [',','.'].
+func splitNumberToken(body string) (groups []string, seps []byte) {
+	start := 0
+	for i := 0; i < len(body); i++ {
+		if body[i] == '.' || body[i] == ',' || body[i] == ' ' {
+			groups = append(groups, body[start:i])
+			seps = append(seps, body[i])
+			start = i + 1
 		}
 	}
-	return b.String()
+	return append(groups, body[start:]), seps
+}
+
+// allThreeDigit reports whether every group has exactly thousandsGroupLen
+// digits, as a thousands separator requires.
+func allThreeDigit(groups []string) bool {
+	for _, g := range groups {
+		if len(g) != thousandsGroupLen {
+			return false
+		}
+	}
+	return true
+}
+
+// canonicalNumber renders a numeric reading in canonical form so equal
+// VALUES compare equal as strings: leading zeros stripped from the integer
+// part, trailing zeros from the fraction, and no negative zero.
+func canonicalNumber(v string) string {
+	neg := strings.HasPrefix(v, "-")
+	if neg {
+		v = v[1:]
+	}
+	intPart, frac, hasFrac := strings.Cut(v, ".")
+	intPart = strings.TrimLeft(intPart, "0")
+	if intPart == "" {
+		intPart = "0"
+	}
+	if hasFrac {
+		frac = strings.TrimRight(frac, "0")
+		hasFrac = frac != ""
+	}
+	out := intPart
+	if hasFrac {
+		out += "." + frac
+	}
+	if neg && out != "0" {
+		return "-" + out
+	}
+	return out
 }
