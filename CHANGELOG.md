@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.56.0](https://github.com/anatolykoptev/go-engine/compare/v1.55.0...v1.56.0) (2026-10-11)
+
+
+### Added
+
+* **llm:** verify fact quotes against cited source text ([#96](https://github.com/anatolykoptev/go-engine/issues/96)) ([1bcfdbe](https://github.com/anatolykoptev/go-engine/commit/1bcfdbea2c0a6119ba4f00776049a2a7832998a7))
+
 ## [1.55.0](https://github.com/anatolykoptev/go-engine/compare/v1.54.0...v1.55.0) (2026-10-10)
 
 
