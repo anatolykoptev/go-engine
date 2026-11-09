@@ -23,7 +23,7 @@ const (
 	mojeekDirectScore    = 1.0
 )
 
-// SearchMojeekDirect queries Mojeek Search via HTML scraping.
+// SearchMojeekDirect queries Mojeek Search via HTML parsing.
 // Returns nil, nil with a slog.Warn if 0 results were parsed (structure changed).
 func SearchMojeekDirect(ctx context.Context, bc BrowserDoer, query string, m *metrics.Registry, timeRange ...string) ([]sources.Result, error) {
 	if m != nil {

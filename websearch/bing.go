@@ -20,7 +20,7 @@ const (
 	bingReferer  = "https://www.bing.com/"
 )
 
-// Bing searches Bing via HTML scraping.
+// Bing searches Bing via HTML parsing.
 type Bing struct {
 	browser BrowserDoer
 }

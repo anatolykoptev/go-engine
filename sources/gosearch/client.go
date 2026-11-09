@@ -104,7 +104,7 @@ type SearchOpts struct {
 
 // SearchWithOpts calls go-search's raw_web_search tool with full option control.
 // Unlike Search, it supports the source parameter for source-profile routing
-// (e.g. source=piternow merges KudaGo SPb API + Piter media SERP).
+// (e.g. source=<profile> merges a local events API with a media SERP).
 func (c *Client) SearchWithOpts(ctx context.Context, query, timeRange string, opts SearchOpts) ([]Result, error) {
 	if c.baseURL == "" {
 		return nil, errors.New("go-search client not configured")

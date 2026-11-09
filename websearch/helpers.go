@@ -45,7 +45,7 @@ func resolveUserAgent(d any) string {
 	return stealth.UserAgentForProfile(stealth.ProfileChrome131)
 }
 
-// ChromeHeadersFor returns browser-like HTTP headers for direct scraping,
+// ChromeHeadersFor returns browser-like HTTP headers for direct fetching,
 // with the User-Agent derived from d's identity so it agrees with the JA3
 // fingerprint the presenting stealth client actually sends. d is the
 // BrowserDoer the caller will issue the request through; pass nil to resolve
@@ -59,12 +59,12 @@ func ChromeHeadersFor(d any) map[string]string {
 	}
 }
 
-// ChromeHeaders returns browser-like HTTP headers for direct scraping.
+// ChromeHeaders returns browser-like HTTP headers for direct fetching.
 //
 // Deprecated: use ChromeHeadersFor(d) with the request's BrowserDoer so the
 // User-Agent is derived from the client's identity instead of the default
 // profile. Kept for backward compatibility and for callers without a doer in
-// hand (tests, ad-hoc scraping).
+// hand (tests, ad-hoc fetching).
 func ChromeHeaders() map[string]string {
 	return ChromeHeadersFor(nil)
 }

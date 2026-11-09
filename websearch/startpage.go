@@ -19,7 +19,7 @@ const (
 	startpageDefaultLang = "english"
 )
 
-// Startpage searches Startpage via POST form scraping.
+// Startpage searches Startpage via POST form parsing.
 type Startpage struct {
 	browser  BrowserDoer
 	language string
