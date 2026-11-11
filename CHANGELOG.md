@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.56.1](https://github.com/anatolykoptev/go-engine/compare/v1.56.0...v1.56.1) (2026-11-11)
+
+
+### Documentation
+
+* bring repository documents up to the repo-standards set ([#103](https://github.com/anatolykoptev/go-engine/issues/103)) ([eb4890c](https://github.com/anatolykoptev/go-engine/commit/eb4890c1d8f869dc7ab26a05bdc82d7bfbe535da))
+
 ## [1.56.0](https://github.com/anatolykoptev/go-engine/compare/v1.55.0...v1.56.0) (2026-10-11)
 
 
