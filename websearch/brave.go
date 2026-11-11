@@ -38,7 +38,7 @@ func BraveSearchURL(query string, opts ...SearchOpts) string {
 	return u
 }
 
-// Brave searches Brave Search via HTML scraping.
+// Brave searches Brave Search via HTML parsing.
 type Brave struct {
 	browser BrowserDoer
 }

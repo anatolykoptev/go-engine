@@ -261,7 +261,7 @@ func runMarginalia(ctx context.Context, cfg DirectConfig, query string) ([]sourc
 	return searchMarginaliaDirect(ctx, cfg.Browser, query, cfg.MarginaliaKey, cfg.Metrics)
 }
 
-// runMojeek fetches Mojeek search results via HTML scraping.
+// runMojeek fetches Mojeek search results via HTML parsing.
 //
 // Mojeek is routed through cfg.MojeekBrowser when set (a residential-proxy
 // BrowserClient) because its anti-bot gate blocks datacenter egress IPs at the
