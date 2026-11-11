@@ -84,7 +84,7 @@
 
 | Pattern | Implementation | go-engine gap |
 |---------|---------------|---------------|
-| Strategy pattern | 7 swappable strategies: proxy, chunking, markdown, content_filter, content_scraping, extraction, deep_crawling | Hardcoded chains, no strategy interface |
+| Strategy pattern | 7 swappable strategies: proxy, chunking, markdown, content filter, HTML content collection, extraction, deep crawling | Hardcoded chains, no strategy interface |
 | Proxy strategy | `RoundRobinProxyStrategy` + session pinning — proxy bound to session, rotated round-robin | go-stealth ProxyPool exists but no session pinning |
 | Chunking strategies | 4 types: character, semantic, NER, regex (`chunking_strategy.py`) | No chunking at all |
 | Markdown generation | `MarkdownGenerationStrategy` — content-type-aware markdown with metadata | trafilatura markdown without content-type awareness |
