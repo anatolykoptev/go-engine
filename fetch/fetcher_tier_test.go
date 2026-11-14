@@ -34,18 +34,19 @@ func largeHTML(content string) []byte {
 
 // newDirectFirstBase builds a Fetcher with directFirst enabled, no proxy, fast retries.
 // Callers inject directClient and optionally proxyClient.
-func newDirectFirstBase() *Fetcher {
-	return New(
+func newDirectFirstBase(extra ...Option) *Fetcher {
+	return New(append([]Option{
+		withFixtureResolver(),
 		WithDirectFirst(true),
-		WithTimeout(5*time.Second),
+		WithTimeout(5 * time.Second),
 		WithRetryConfig(RetryConfig{
 			MaxRetries:  0,
 			InitialWait: time.Millisecond,
 			MaxWait:     time.Millisecond,
 			Multiplier:  1,
 		}),
-		WithBlockTTL(5*time.Minute),
-	)
+		WithBlockTTL(5 * time.Minute),
+	}, extra...)...)
 }
 
 // Test 1: Direct succeeds (200 OK, large body) → proxy never called.
@@ -278,6 +279,7 @@ func Test_LegacyMode_ProxyFirst(t *testing.T) {
 
 	// Default (no WithDirectFirst at all).
 	fDefault := New(
+		withFixtureResolver(),
 		WithTimeout(5*time.Second),
 		WithRetryConfig(RetryConfig{MaxRetries: 0, InitialWait: time.Millisecond, MaxWait: time.Millisecond, Multiplier: 1}),
 	)

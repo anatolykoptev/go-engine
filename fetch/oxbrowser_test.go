@@ -203,6 +203,7 @@ func TestFetchBody_OxBrowserFallback(t *testing.T) {
 	defer oxSrv.Close()
 
 	f := New(
+		withFixtureNetwork(primary),
 		WithTimeout(2*time.Second),
 		WithRetryConfig(RetryConfig{
 			MaxRetries:  1,
@@ -213,7 +214,7 @@ func TestFetchBody_OxBrowserFallback(t *testing.T) {
 		WithOxBrowser(oxSrv.URL),
 	)
 
-	body, err := f.FetchBody(context.Background(), primary.URL)
+	body, err := f.FetchBody(context.Background(), fixtureURL(primary))
 	if err != nil {
 		t.Fatalf("FetchBody with ox-browser fallback: %v", err)
 	}

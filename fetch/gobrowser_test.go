@@ -119,6 +119,7 @@ func TestFetchBody_GoBrowserFallback(t *testing.T) {
 	defer gbSrv.Close()
 
 	f := New(
+		withFixtureNetwork(primary),
 		WithTimeout(2*time.Second),
 		WithRetryConfig(RetryConfig{
 			MaxRetries:  1,
@@ -129,7 +130,7 @@ func TestFetchBody_GoBrowserFallback(t *testing.T) {
 		WithGoBrowserFallback(gbSrv.URL),
 	)
 
-	body, err := f.FetchBody(context.Background(), primary.URL)
+	body, err := f.FetchBody(context.Background(), fixtureURL(primary))
 	if err != nil {
 		t.Fatalf("FetchBody with go-browser fallback: %v", err)
 	}

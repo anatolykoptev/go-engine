@@ -26,6 +26,7 @@ type atomicMetrics struct {
 	escalHint     atomic.Int64
 	escalCached   atomic.Int64
 	cacheHosts    atomic.Int64
+	ssrfBlocked   atomic.Int64
 }
 
 func (m *atomicMetrics) incTier(tier, result string) {
@@ -70,6 +71,8 @@ func (m *atomicMetrics) incEscalation(reason string) {
 func (m *atomicMetrics) setBlockCacheHosts(n int) {
 	m.cacheHosts.Store(int64(n))
 }
+
+func (m *atomicMetrics) incSSRFBlocked() { m.ssrfBlocked.Add(1) }
 
 // newMetricsFetcher builds a directFirst Fetcher with atomicMetrics injected.
 func newMetricsFetcher(m fetchMetrics) *Fetcher {

@@ -17,7 +17,6 @@ import (
 	"strings"
 	"time"
 
-	kithttputil "github.com/anatolykoptev/go-kit/httputil"
 	stealth "github.com/anatolykoptev/go-stealth"
 	"github.com/anatolykoptev/go-stealth/proxypool"
 )
@@ -56,7 +55,9 @@ type stealthDoer interface {
 
 // Fetcher retrieves HTTP response bodies with optional proxy routing.
 type Fetcher struct {
-	httpClient        *http.Client
+	httpClient        *http.Client // plain-HTTP tier; always derived from guard in New()
+	timeout           time.Duration
+	guard             guard // destination policy shared by every client built in New()
 	browserClient     *stealth.BrowserClient
 	proxyClient       stealthDoer // proxy-tier doer; set to browserClient in New(), injectable in tests
 	directClient      stealthDoer // Chrome TLS, no proxy — used for direct-first tier; *stealth.BrowserClient in prod, mock in tests
@@ -78,7 +79,7 @@ type Option func(*Fetcher)
 
 // WithTimeout sets the HTTP client timeout.
 func WithTimeout(d time.Duration) Option {
-	return func(f *Fetcher) { f.httpClient.Timeout = d }
+	return func(f *Fetcher) { f.timeout = d }
 }
 
 // WithRetryConfig sets the retry configuration.
@@ -155,24 +156,13 @@ func WithMetrics(m fetchMetrics) Option {
 }
 
 // New creates a Fetcher with the given options.
+//
+// Every client built here dials a destination the caller supplied, so every
+// one is derived from the same destination guard (see guard.go) whatever the
+// options: there is no mode in which a tier is built without it.
 func New(opts ...Option) *Fetcher {
 	f := &Fetcher{
-		httpClient: &http.Client{
-			Timeout: defaultTimeout,
-			Transport: &http.Transport{
-				MaxIdleConns:        defaultMaxIdleConns,
-				MaxIdleConnsPerHost: defaultMaxIdleConnsPerHost,
-				IdleConnTimeout:     defaultIdleConnTimeout,
-				DisableCompression:  false,
-				TLSHandshakeTimeout: defaultTLSHandshakeTimeout,
-			},
-			CheckRedirect: func(_ *http.Request, via []*http.Request) error {
-				if len(via) >= defaultMaxRedirects {
-					return fmt.Errorf("stopped after %d redirects", defaultMaxRedirects)
-				}
-				return nil
-			},
-		},
+		timeout:     defaultTimeout,
 		retryConfig: FetchRetryConfig,
 		metrics:     noopMetrics{},
 	}
@@ -180,20 +170,36 @@ func New(opts ...Option) *Fetcher {
 		o(f)
 	}
 
+	// Plain-HTTP tier: built after the options so the timeout is final, and
+	// only ever through the guard.
+	f.httpClient = f.guard.httpClient(&http.Client{
+		Timeout: f.timeout,
+		Transport: &http.Transport{
+			MaxIdleConns:        defaultMaxIdleConns,
+			MaxIdleConnsPerHost: defaultMaxIdleConnsPerHost,
+			IdleConnTimeout:     defaultIdleConnTimeout,
+			DisableCompression:  false,
+			TLSHandshakeTimeout: defaultTLSHandshakeTimeout,
+		},
+		CheckRedirect: func(_ *http.Request, via []*http.Request) error {
+			if len(via) >= defaultMaxRedirects {
+				return fmt.Errorf("stopped after %d redirects", defaultMaxRedirects)
+			}
+			return nil
+		},
+	})
+
 	// Build BrowserClient after all options are applied (order-independent).
-	// Proxied tier: the dial target is always the proxy's vantage point, so
-	// WithDialControl would only ever see the proxy IP (proxy-blind) — not
-	// wired here. WithRequestURLGuard (tier-3) still upgrades the pre-request
-	// check on the initial URL from go-stealth's stdlib floor to go-kit's
-	// fuller policy (CGNAT / NAT64 / alt-encoded-IP rejection).
+	// Proxied tier: the connect-time check sees the proxy (or, when the pool
+	// runs dry, the destination itself), the URL and redirect checks see the
+	// destination. All three tiers come from the shared guard.
 	if f.proxyPool != nil {
-		stealthOpts := []stealth.ClientOption{
+		stealthOpts := append([]stealth.ClientOption{
 			stealth.WithTimeout(browserClientTimeoutSec),
 			stealth.WithProxyPool(f.proxyPool),
 			stealth.WithFollowRedirects(),
 			stealth.WithRetryOnBlock(2),
-			stealth.WithRequestURLGuard(kithttputil.CheckURL),
-		}
+		}, f.guard.stealthOptions()...)
 		if f.cookieProvider != nil {
 			stealthOpts = append(stealthOpts, stealth.WithCookieSolver(f.cookieProvider))
 		}
@@ -204,21 +210,14 @@ func New(opts ...Option) *Fetcher {
 	}
 
 	// Build a no-proxy Chrome-TLS client for the direct tier (directFirst mode only).
-	// Direct tier dials the target from this container itself, so it gets the
-	// full three-tier go-kit SSRF policy: DialControl (connect-time,
-	// rebind-proof) + RedirectGuard (per-hop pre-resolve) + RequestURLGuard
-	// (initial URL). See go-stealth v1.18.0's stdlib default-deny floor,
-	// which this wiring upgrades to go-kit's richer IsBlockedIP policy.
+	// Direct tier dials the destination from this process itself; it gets the
+	// same shared guard as every other tier.
 	// Skip if directClient was already injected (e.g. in tests).
 	if f.directFirst && f.directClient == nil {
-		redirectGuard, dialControl := kithttputil.SSRFGuards()
-		if dc, err := stealth.NewClient(
+		if dc, err := stealth.NewClient(append([]stealth.ClientOption{
 			stealth.WithTimeout(browserClientTimeoutSec),
 			stealth.WithFollowRedirects(),
-			stealth.WithDialControl(dialControl),
-			stealth.WithRedirectGuard(redirectGuard),
-			stealth.WithRequestURLGuard(kithttputil.CheckURL),
-		); err == nil {
+		}, f.guard.stealthOptions()...)...); err == nil {
 			f.directClient = dc
 		}
 		if f.blockCache == nil {
@@ -252,6 +251,14 @@ func (f *Fetcher) FetchBody(ctx context.Context, url string) ([]byte, error) {
 // equivalent to calling [FetchBody] — all tiering, fallback, block-cache,
 // and metrics behaviour is preserved.
 func (f *Fetcher) FetchBodyWithHeaders(ctx context.Context, url string, extra map[string]string) ([]byte, error) {
+	// Destination guard, once, before any tier: the forwarding fallbacks
+	// (ox-browser, go-browser, Byparr) dial the URL from another service, so a
+	// refusal from a primary tier must never reach them as a retry target.
+	if err := f.guard.checkRaw(ctx, url); err != nil {
+		f.countRefusal(err)
+		return nil, terminalIfBlocked(err)
+	}
+
 	permanent := f.retryTracker != nil && !f.retryTracker.ShouldRetry(url)
 	if permanent && !f.hasFallback() {
 		return nil, ErrPermanentlyFailed
@@ -259,6 +266,10 @@ func (f *Fetcher) FetchBodyWithHeaders(ctx context.Context, url string, extra ma
 
 	body, err := f.fetchPrimaryWithHeaders(ctx, url, permanent, extra)
 	body, err = f.tryFallbacks(ctx, url, body, err)
+	if isSSRFBlocked(err) {
+		err = terminalIfBlocked(err)
+		f.countRefusal(err) // refused by a tier's own guard: redirect hop, rebind, or proxy/direct URL check
+	}
 
 	if f.retryTracker != nil {
 		if err != nil {
@@ -269,6 +280,15 @@ func (f *Fetcher) FetchBodyWithHeaders(ctx context.Context, url string, extra ma
 	}
 
 	return body, err
+}
+
+// countRefusal bumps the guard-refusal counter for a blocked destination. A name
+// that merely failed to resolve is refused too (fail closed) but is not counted:
+// dead hosts are routine and would drown the signal.
+func (f *Fetcher) countRefusal(err error) {
+	if isSSRFBlocked(err) && !isResolveFailure(err) {
+		f.metrics.incSSRFBlocked()
+	}
 }
 
 // mergeHeaders returns a copy of ChromeHeaders with extra merged over it.
@@ -349,6 +369,14 @@ func (f *Fetcher) fetchDirectFirstWithHeaders(ctx context.Context, url string, e
 	// 3. Direct attempt via Chrome-TLS directClient (no proxy).
 	body, hdrs, status, directErr := f.fetchDirectRaw(ctx, url, extra)
 
+	// A guard refusal is terminal. classifyBlock reads any transport error as a
+	// TLS-level block, which would mark the host in the block cache (so the next
+	// request skips the direct tier) and escalate to the proxy/plain tier.
+	if isSSRFBlocked(directErr) {
+		f.metrics.incTier("direct", "err")
+		return nil, terminalIfBlocked(directErr)
+	}
+
 	// 4. Classify block signal.
 	sig := classifyBlock(status, hdrs, body, directErr)
 	if sig == sigNone {
@@ -405,6 +433,12 @@ func (f *Fetcher) fetchProxyAndRecordWithHeaders(ctx context.Context, url string
 // Order: ox-browser → go-browser /render → legacy Byparr.
 // Each fallback gets the shorter of its own timeout or the parent context deadline.
 func (f *Fetcher) tryFallbacks(ctx context.Context, url string, body []byte, err error) ([]byte, error) {
+	// A destination-guard refusal is about the URL, not the tier: handing the
+	// same URL to a forwarder would dial it from a service that has no say here.
+	if isSSRFBlocked(err) {
+		return body, terminalIfBlocked(err)
+	}
+
 	if err != nil && f.oxBrowserURL != "" {
 		obCtx, obCancel := childTimeout(ctx, oxBrowserTimeout+5*time.Second)
 		defer obCancel()
@@ -498,7 +532,7 @@ func (f *Fetcher) fetchViaProxy(ctx context.Context, fetchURL string, extra map[
 	return RetryDo(ctx, f.retryConfig, func() ([]byte, error) {
 		data, _, status, err := f.proxyClient.DoCtx(ctx, http.MethodGet, fetchURL, headers, nil)
 		if err != nil {
-			return nil, err
+			return nil, terminalIfBlocked(err)
 		}
 		if status != http.StatusOK {
 			return nil, &stealth.HttpStatusError{StatusCode: status}
@@ -526,7 +560,8 @@ func (f *Fetcher) fetchViaHTTP(ctx context.Context, fetchURL string, extra map[s
 		for k, v := range extra {
 			req.Header.Set(k, v)
 		}
-		return f.httpClient.Do(req) //nolint:gosec // URL is user-provided by design
+		resp, err := f.httpClient.Do(req) //nolint:gosec // URL is user-provided by design
+		return resp, terminalIfBlocked(err)
 	})
 	if err != nil {
 		return nil, err
@@ -565,7 +600,7 @@ func (f *Fetcher) fetchDirectRaw(ctx context.Context, fetchURL string, extra map
 
 	data, respHdrs, respStatus, doErr := f.directClient.DoCtx(ctx, http.MethodGet, fetchURL, headers, nil)
 	if doErr != nil {
-		return nil, nil, 0, doErr
+		return nil, nil, 0, terminalIfBlocked(doErr)
 	}
 
 	// Convert stealth response headers (map[string]string) to http.Header.
