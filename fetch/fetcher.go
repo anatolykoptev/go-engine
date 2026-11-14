@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	neturl "net/url"
 	"strings"
@@ -64,6 +65,8 @@ type Fetcher struct {
 	retryConfig       RetryConfig
 	retryTracker      *stealth.RetryTracker
 	proxyPool         proxypool.ProxyPool    // deferred: used to build browserClient in New()
+	pool              *guardedPool           // proxyPool wrapped so it never answers "" (see guardedPool)
+	poolFallback      stealthDoer            // guarded no-proxy client for requests the pool had no proxy for
 	cookieProvider    stealth.CookieProvider // deferred: passed to stealth.NewClient in New()
 	byparrURL         string                 // Byparr fallback URL (empty = disabled)
 	oxBrowserURL      string                 // ox-browser /fetch fallback (empty = disabled)
@@ -180,6 +183,9 @@ func New(opts ...Option) *Fetcher {
 			IdleConnTimeout:     defaultIdleConnTimeout,
 			DisableCompression:  false,
 			TLSHandshakeTimeout: defaultTLSHandshakeTimeout,
+			// go-kit replaces DialContext, which switches HTTP/2 off unless it
+			// is forced; the transport had it before the guard was added.
+			ForceAttemptHTTP2: true,
 		},
 		CheckRedirect: func(_ *http.Request, via []*http.Request) error {
 			if len(via) >= defaultMaxRedirects {
@@ -194,9 +200,11 @@ func New(opts ...Option) *Fetcher {
 	// runs dry, the destination itself), the URL and redirect checks see the
 	// destination. All three tiers come from the shared guard.
 	if f.proxyPool != nil {
+		f.pool = newGuardedPool(f.proxyPool)
 		stealthOpts := append([]stealth.ClientOption{
 			stealth.WithTimeout(browserClientTimeoutSec),
-			stealth.WithProxyPool(f.proxyPool),
+			stealth.WithProxyPool(f.pool),
+			stealth.WithProxy(emptyPoolProxy),
 			stealth.WithFollowRedirects(),
 			stealth.WithRetryOnBlock(2),
 		}, f.guard.stealthOptions()...)
@@ -206,6 +214,15 @@ func New(opts ...Option) *Fetcher {
 		if bc, err := stealth.NewClient(stealthOpts...); err == nil {
 			f.browserClient = bc
 			f.proxyClient = bc
+		}
+		// A request the pool has no proxy for must not dial through the proxy
+		// client (its no-proxy dialer carries no connect-time hook); it runs on
+		// this guarded direct client instead.
+		if fb, err := stealth.NewClient(append([]stealth.ClientOption{
+			stealth.WithTimeout(browserClientTimeoutSec),
+			stealth.WithFollowRedirects(),
+		}, f.guard.stealthOptions()...)...); err == nil {
+			f.poolFallback = fb
 		}
 	}
 
@@ -254,9 +271,8 @@ func (f *Fetcher) FetchBodyWithHeaders(ctx context.Context, url string, extra ma
 	// Destination guard, once, before any tier: the forwarding fallbacks
 	// (ox-browser, go-browser, Byparr) dial the URL from another service, so a
 	// refusal from a primary tier must never reach them as a retry target.
-	if err := f.guard.checkRaw(ctx, url); err != nil {
-		f.countRefusal(err)
-		return nil, terminalIfBlocked(err)
+	if err := f.checkDestination(ctx, url); err != nil {
+		return nil, err
 	}
 
 	permanent := f.retryTracker != nil && !f.retryTracker.ShouldRetry(url)
@@ -280,6 +296,43 @@ func (f *Fetcher) FetchBodyWithHeaders(ctx context.Context, url string, extra ma
 	}
 
 	return body, err
+}
+
+// checkDestination is the guard's single entry point for a URL. A blocked
+// destination is refused. A name that does not resolve is refused too (a
+// forwarder could resolve it to somewhere the local lookup never saw), but only
+// after one retry of the lookup, because a transient resolver failure is not
+// evidence about the host; it is counted and logged separately and returned as
+// ErrResolveFailed, never as ErrSSRFBlocked.
+func (f *Fetcher) checkDestination(ctx context.Context, rawURL string) error {
+	err := f.guard.checkRaw(ctx, rawURL)
+	if err != nil && isSSRFBlocked(err) && resolveCause(err) != nil && ctx.Err() == nil {
+		err = f.guard.checkRaw(ctx, rawURL) // one retry, lookups only: no address was blocked
+	}
+	switch {
+	case err == nil:
+		return nil
+	case isSSRFBlocked(err) && resolveCause(err) != nil:
+		host := hostOf(rawURL)
+		if ctx.Err() == nil { // the caller giving up is not the resolver failing
+			f.metrics.incResolveRefused()
+			slog.Warn("fetch: destination not fetched, name did not resolve",
+				slog.String("host", host), slog.Any("error", resolveCause(err)))
+		}
+		return asResolveError(err, host)
+	default:
+		f.countRefusal(err)
+		return terminalIfBlocked(err)
+	}
+}
+
+// hostOf returns the host of rawURL for logging, never the URL itself.
+func hostOf(rawURL string) string {
+	u, err := neturl.Parse(rawURL)
+	if err != nil {
+		return ""
+	}
+	return u.Hostname()
 }
 
 // countRefusal bumps the guard-refusal counter for a blocked destination. A name
@@ -372,7 +425,7 @@ func (f *Fetcher) fetchDirectFirstWithHeaders(ctx context.Context, url string, e
 	// A guard refusal is terminal. classifyBlock reads any transport error as a
 	// TLS-level block, which would mark the host in the block cache (so the next
 	// request skips the direct tier) and escalate to the proxy/plain tier.
-	if isSSRFBlocked(directErr) {
+	if isRefusal(directErr) {
 		f.metrics.incTier("direct", "err")
 		return nil, terminalIfBlocked(directErr)
 	}
@@ -435,7 +488,7 @@ func (f *Fetcher) fetchProxyAndRecordWithHeaders(ctx context.Context, url string
 func (f *Fetcher) tryFallbacks(ctx context.Context, url string, body []byte, err error) ([]byte, error) {
 	// A destination-guard refusal is about the URL, not the tier: handing the
 	// same URL to a forwarder would dial it from a service that has no say here.
-	if isSSRFBlocked(err) {
+	if isRefusal(err) {
 		return body, terminalIfBlocked(err)
 	}
 
@@ -529,7 +582,8 @@ func (f *Fetcher) fetchViaProxy(ctx context.Context, fetchURL string, extra map[
 		headers[strings.ToLower(k)] = v
 	}
 
-	return RetryDo(ctx, f.retryConfig, func() ([]byte, error) {
+	emptied := f.pool.emptiedCount()
+	body, err := RetryDo(ctx, f.retryConfig, func() ([]byte, error) {
 		data, _, status, err := f.proxyClient.DoCtx(ctx, http.MethodGet, fetchURL, headers, nil)
 		if err != nil {
 			return nil, terminalIfBlocked(err)
@@ -539,6 +593,23 @@ func (f *Fetcher) fetchViaProxy(ctx context.Context, fetchURL string, extra map[
 		}
 		return data, nil
 	})
+	// The pool had no proxy for (some of) this request, so the proxy client was
+	// pointed at the dead emptyPoolProxy and the request failed. Run it on the
+	// guarded direct client, whose own checks decide the outcome.
+	if err != nil && f.poolFallback != nil && f.pool.emptiedCount() != emptied {
+		slog.Warn("fetch: proxy pool had no proxy, fetching on the guarded direct client")
+		return RetryDo(ctx, f.retryConfig, func() ([]byte, error) {
+			data, _, status, derr := f.poolFallback.DoCtx(ctx, http.MethodGet, fetchURL, headers, nil)
+			if derr != nil {
+				return nil, terminalIfBlocked(derr)
+			}
+			if status != http.StatusOK {
+				return nil, &stealth.HttpStatusError{StatusCode: status}
+			}
+			return data, nil
+		})
+	}
+	return body, err
 }
 
 // fetchViaHTTP uses the standard HTTP client with retry.

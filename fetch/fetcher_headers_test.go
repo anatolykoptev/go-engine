@@ -51,7 +51,7 @@ func TestFetchBodyWithHeaders_HTTPPath_AcceptJSON(t *testing.T) {
 	defer srv.Close()
 
 	f := New(
-		withFixtureNetwork(srv),
+		withFixtureNetwork(t, srv),
 		WithTimeout(5*time.Second),
 		WithRetryConfig(RetryConfig{MaxRetries: 0, InitialWait: time.Millisecond, MaxWait: time.Millisecond, Multiplier: 1}),
 	)
@@ -80,7 +80,7 @@ func TestFetchBodyWithHeaders_HTTPPath_NilExtra(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	f := New(withFixtureNetwork(srv), WithTimeout(5*time.Second))
+	f := New(withFixtureNetwork(t, srv), WithTimeout(5*time.Second))
 
 	bodyA, errA := f.FetchBody(context.Background(), fixtureURL(srv))
 	bodyB, errB := f.FetchBodyWithHeaders(context.Background(), fixtureURL(srv), nil)
@@ -160,7 +160,7 @@ func TestFetchBody_DelegatesTo_FetchBodyWithHeaders_NilExtra(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	f := New(withFixtureNetwork(srv), WithTimeout(5*time.Second))
+	f := New(withFixtureNetwork(t, srv), WithTimeout(5*time.Second))
 
 	a, errA := f.FetchBody(context.Background(), fixtureURL(srv))
 	b, errB := f.FetchBodyWithHeaders(context.Background(), fixtureURL(srv), nil)

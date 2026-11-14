@@ -13,20 +13,21 @@ import (
 // atomicMetrics is a test-local fetchMetrics stub backed by atomic counters.
 // It avoids any global prometheus registry, making tests isolation-safe.
 type atomicMetrics struct {
-	tierDirect    atomic.Int64
-	tierDirectErr atomic.Int64
-	tierProxy     atomic.Int64
-	tierProxyErr  atomic.Int64
-	signalHard    atomic.Int64
-	signalSoft    atomic.Int64
-	signalTLS     atomic.Int64
-	escalHard     atomic.Int64
-	escalSoft     atomic.Int64
-	escalTLS      atomic.Int64
-	escalHint     atomic.Int64
-	escalCached   atomic.Int64
-	cacheHosts    atomic.Int64
-	ssrfBlocked   atomic.Int64
+	tierDirect     atomic.Int64
+	tierDirectErr  atomic.Int64
+	tierProxy      atomic.Int64
+	tierProxyErr   atomic.Int64
+	signalHard     atomic.Int64
+	signalSoft     atomic.Int64
+	signalTLS      atomic.Int64
+	escalHard      atomic.Int64
+	escalSoft      atomic.Int64
+	escalTLS       atomic.Int64
+	escalHint      atomic.Int64
+	escalCached    atomic.Int64
+	cacheHosts     atomic.Int64
+	ssrfBlocked    atomic.Int64
+	resolveRefused atomic.Int64
 }
 
 func (m *atomicMetrics) incTier(tier, result string) {
@@ -73,6 +74,8 @@ func (m *atomicMetrics) setBlockCacheHosts(n int) {
 }
 
 func (m *atomicMetrics) incSSRFBlocked() { m.ssrfBlocked.Add(1) }
+
+func (m *atomicMetrics) incResolveRefused() { m.resolveRefused.Add(1) }
 
 // newMetricsFetcher builds a directFirst Fetcher with atomicMetrics injected.
 func newMetricsFetcher(m fetchMetrics) *Fetcher {

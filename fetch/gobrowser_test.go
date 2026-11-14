@@ -119,7 +119,7 @@ func TestFetchBody_GoBrowserFallback(t *testing.T) {
 	defer gbSrv.Close()
 
 	f := New(
-		withFixtureNetwork(primary),
+		withFixtureNetwork(t, primary),
 		WithTimeout(2*time.Second),
 		WithRetryConfig(RetryConfig{
 			MaxRetries:  1,

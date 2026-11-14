@@ -15,7 +15,7 @@ func TestFetcher_FetchBody_PlainHTTP(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	f := New(withFixtureNetwork(srv), WithTimeout(5*time.Second))
+	f := New(withFixtureNetwork(t, srv), WithTimeout(5*time.Second))
 	body, err := f.FetchBody(context.Background(), fixtureURL(srv))
 	if err != nil {
 		t.Fatalf("FetchBody: %v", err)
@@ -34,7 +34,7 @@ func TestFetcher_FetchBody_Gzip(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	f := New(withFixtureNetwork(srv), WithTimeout(5*time.Second))
+	f := New(withFixtureNetwork(t, srv), WithTimeout(5*time.Second))
 	body, err := f.FetchBody(context.Background(), fixtureURL(srv))
 	if err != nil {
 		t.Fatalf("FetchBody: %v", err)
@@ -51,7 +51,7 @@ func TestFetcher_FetchBody_ServerError(t *testing.T) {
 	defer srv.Close()
 
 	f := New(
-		withFixtureNetwork(srv),
+		withFixtureNetwork(t, srv),
 		WithTimeout(5*time.Second),
 		WithRetryConfig(RetryConfig{
 			MaxRetries:  1,
@@ -73,7 +73,7 @@ func TestFetcher_FetchBody_ContextCancelled(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	f := New(withFixtureNetwork(srv), WithTimeout(10*time.Second))
+	f := New(withFixtureNetwork(t, srv), WithTimeout(10*time.Second))
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
@@ -122,7 +122,7 @@ func TestFetcher_UserAgentHeader(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	f := New(withFixtureNetwork(srv), WithTimeout(5*time.Second))
+	f := New(withFixtureNetwork(t, srv), WithTimeout(5*time.Second))
 	_, err := f.FetchBody(context.Background(), fixtureURL(srv))
 	if err != nil {
 		t.Fatalf("FetchBody: %v", err)

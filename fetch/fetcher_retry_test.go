@@ -22,7 +22,7 @@ func TestFetcher_WithRetryTracker_SkipsPermanent(t *testing.T) {
 
 	tracker := stealth.NewRetryTracker(3, time.Minute)
 	f := New(
-		withFixtureNetwork(srv),
+		withFixtureNetwork(t, srv),
 		WithTimeout(5*time.Second),
 		WithRetryConfig(RetryConfig{
 			MaxRetries:  0,
@@ -64,7 +64,7 @@ func TestFetcher_RetryHook_ReceivesAttempts(t *testing.T) {
 	defer srv.Close()
 
 	f := New(
-		withFixtureNetwork(srv),
+		withFixtureNetwork(t, srv),
 		WithTimeout(5*time.Second),
 		WithRetryConfig(RetryConfig{
 			MaxRetries:  2,

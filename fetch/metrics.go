@@ -29,8 +29,13 @@ type fetchMetrics interface {
 
 	// incSSRFBlocked records a fetch refused by the destination guard (blocked
 	// address, redirect hop, DNS rebind, or disallowed scheme). Name-resolution
-	// failures are not counted.
+	// failures are counted by incResolveRefused instead.
 	incSSRFBlocked()
+
+	// incResolveRefused records a fetch refused, fail closed, because the
+	// destination name did not resolve (after one retry of the lookup). Not an
+	// attack signal: dead and flaky hosts land here.
+	incResolveRefused()
 }
 
 // noopMetrics is a no-op implementation — used when WithMetrics is not called.
@@ -41,6 +46,7 @@ func (noopMetrics) incBlockSignal(_ string)  {}
 func (noopMetrics) incEscalation(_ string)   {}
 func (noopMetrics) setBlockCacheHosts(_ int) {}
 func (noopMetrics) incSSRFBlocked()          {}
+func (noopMetrics) incResolveRefused()       {}
 
 // promTierMetrics implements fetchMetrics using prometheus counter/gauge vectors.
 type promTierMetrics struct {
@@ -49,6 +55,7 @@ type promTierMetrics struct {
 	escalations    *prometheus.CounterVec
 	blockCacheSize prometheus.Gauge
 	ssrfBlocked    prometheus.Counter
+	resolveRefused prometheus.Counter
 }
 
 // NewPromMetrics creates a promTierMetrics registered on the given prometheus.Registerer.
@@ -61,6 +68,7 @@ type promTierMetrics struct {
 //	go_engine_fetch_proxy_escalations_total{reason}
 //	go_engine_fetch_direct_block_cache_hosts
 //	go_engine_fetch_ssrf_blocked_total
+//	go_engine_fetch_resolve_refused_total
 func NewPromMetrics(reg prometheus.Registerer) (fetchMetrics, error) {
 	tierTotal := prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "go_engine_fetch_tier_total",
@@ -84,10 +92,15 @@ func NewPromMetrics(reg prometheus.Registerer) (fetchMetrics, error) {
 
 	ssrfBlocked := prometheus.NewCounter(prometheus.CounterOpts{
 		Name: "go_engine_fetch_ssrf_blocked_total",
-		Help: "Fetches refused by the destination guard (blocked address, redirect hop, DNS rebind, disallowed scheme). Names that fail to resolve are refused but not counted.",
+		Help: "Fetches refused by the destination guard (blocked address, redirect hop, DNS rebind, disallowed scheme). Names that fail to resolve are counted separately.",
 	})
 
-	for _, c := range []prometheus.Collector{tierTotal, blockSignal, escalations, blockCacheSize, ssrfBlocked} {
+	resolveRefused := prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "go_engine_fetch_resolve_refused_total",
+		Help: "Fetches refused, fail closed, because the destination name did not resolve after one retry of the lookup. Not an attack signal.",
+	})
+
+	for _, c := range []prometheus.Collector{tierTotal, blockSignal, escalations, blockCacheSize, ssrfBlocked, resolveRefused} {
 		if err := reg.Register(c); err != nil {
 			return nil, err
 		}
@@ -99,6 +112,7 @@ func NewPromMetrics(reg prometheus.Registerer) (fetchMetrics, error) {
 		escalations:    escalations,
 		blockCacheSize: blockCacheSize,
 		ssrfBlocked:    ssrfBlocked,
+		resolveRefused: resolveRefused,
 	}, nil
 }
 
@@ -120,4 +134,8 @@ func (m *promTierMetrics) setBlockCacheHosts(n int) {
 
 func (m *promTierMetrics) incSSRFBlocked() {
 	m.ssrfBlocked.Inc()
+}
+
+func (m *promTierMetrics) incResolveRefused() {
+	m.resolveRefused.Inc()
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"net/http"
+	"testing"
 	"time"
 )
 
@@ -26,8 +27,12 @@ const testNetworkDialTimeout = 5 * time.Second
 // A URL that is a literal loopback, private or metadata address is still refused,
 // and the Chrome-TLS tiers are not affected. Because the dialed address is chosen
 // by the code that passes addr, never by a URL, this cannot be used to steer a
-// fetch at an internal address. Do not set it outside tests.
-func WithTestNetwork(addr string) Option {
+// fetch at an internal address.
+//
+// It takes a testing.TB so that it can only be called from a test: production
+// code has no TB to pass.
+func WithTestNetwork(tb testing.TB, addr string) Option {
+	tb.Helper()
 	return func(f *Fetcher) {
 		f.guard.resolver = publicResolver{}
 		f.guard.transport = fixedAddrTransport{addr: addr}

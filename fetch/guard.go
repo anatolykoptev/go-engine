@@ -7,9 +7,11 @@ import (
 	"net"
 	"net/http"
 	neturl "net/url"
+	"sync/atomic"
 
 	kithttputil "github.com/anatolykoptev/go-kit/httputil"
 	stealth "github.com/anatolykoptev/go-stealth"
+	"github.com/anatolykoptev/go-stealth/proxypool"
 )
 
 // The destination guard.
@@ -31,8 +33,10 @@ import (
 //
 // The proxy tier dials an operator-configured proxy, so its connect-time check
 // sees the proxy address, not the destination; the URL and redirect checks are
-// what guard the destination there. The connect-time check still matters on that
-// client: a pool that runs dry falls back to dialing the destination directly.
+// what guard the destination there. A pool that returns no proxy would make
+// go-stealth dial the destination directly through a dialer that carries no
+// connect-time hook, so the pool is wrapped ([guardedPool]) and such requests go
+// to a guarded direct client instead.
 
 // guard is the destination policy shared by every client the Fetcher builds.
 // The zero value is the production policy; the fields exist only so tests can
@@ -44,6 +48,9 @@ type guard struct {
 	// transport replaces the plain tier's network leg. nil selects a real
 	// dial-guarded transport.
 	transport http.RoundTripper
+	// dialer is the base dialer of the plain tier; its Control hook runs before
+	// the guard's. nil selects go-kit's default dialer.
+	dialer *net.Dialer
 }
 
 // errAllowed is returned by allowTransport to tell guard.check that the
@@ -57,10 +64,14 @@ type allowTransport struct{}
 func (allowTransport) RoundTrip(*http.Request) (*http.Response, error) { return nil, errAllowed }
 
 func (g guard) ssrfOptions() []kithttputil.SSRFOption {
-	if g.resolver == nil {
-		return nil
+	var opts []kithttputil.SSRFOption
+	if g.resolver != nil {
+		opts = append(opts, kithttputil.WithResolver(g.resolver))
 	}
-	return []kithttputil.SSRFOption{kithttputil.WithResolver(g.resolver)}
+	if g.dialer != nil {
+		opts = append(opts, kithttputil.WithDialer(g.dialer))
+	}
+	return opts
 }
 
 // check is the pre-request URL guard. It runs the same go-kit policy as the
@@ -118,7 +129,7 @@ func (g guard) stealthOptions() []stealth.ClientOption {
 	}
 }
 
-// ErrSSRFBlocked matches (errors.Is) every refusal by the destination guard,
+// ErrSSRFBlocked matches (errors.Is) every refusal of a blocked destination,
 // whichever tier raised it: the pre-request check, a redirect hop, or the
 // connect-time check. It is the go-kit sentinel, so callers that already match
 // the go-kit one keep working.
@@ -127,14 +138,78 @@ func (g guard) stealthOptions() []stealth.ClientOption {
 // forwarder, the plain HTTP client) is attempted for the same URL.
 var ErrSSRFBlocked = kithttputil.ErrSSRFBlocked
 
+// ErrResolveFailed matches (errors.Is) a destination that was refused because its
+// name could not be resolved (a DNS failure, or the caller's context ending
+// during the lookup). The guard fails closed, so the host is not dialed and not
+// forwarded, but nothing was found to be blocked: callers must not report this
+// as an attack. The underlying cause (*net.DNSError, context.DeadlineExceeded,
+// context.Canceled) stays reachable through errors.Is and errors.As.
+var ErrResolveFailed = errors.New("fetch: destination name did not resolve")
+
+// resolveError is a guard refusal caused by a failed name lookup. It wraps only
+// the lookup's cause, never go-kit's ErrSSRFBlocked.
+type resolveError struct {
+	host  string
+	cause error
+}
+
+func (e *resolveError) Error() string {
+	if e.host == "" {
+		return "fetch: name resolution failed, destination not fetched: " + e.cause.Error()
+	}
+	return "fetch: name resolution failed for " + e.host + ", destination not fetched: " + e.cause.Error()
+}
+
+func (e *resolveError) Unwrap() error { return e.cause }
+
+func (e *resolveError) Is(target error) bool { return target == ErrResolveFailed }
+
+// resolveCause extracts the lookup failure from a guard error: the *net.DNSError
+// if there is one, otherwise the context error. It returns nil when err is not a
+// lookup failure.
+func resolveCause(err error) error {
+	var d *net.DNSError
+	switch {
+	case errors.As(err, &d):
+		return d
+	case errors.Is(err, context.DeadlineExceeded):
+		return context.DeadlineExceeded
+	case errors.Is(err, context.Canceled):
+		return context.Canceled
+	}
+	return nil
+}
+
+// isResolveFailure reports whether a guard refusal is a failed name lookup
+// rather than an address the policy blocks.
+func isResolveFailure(err error) bool {
+	var r *resolveError
+	return errors.As(err, &r) || (isSSRFBlocked(err) && resolveCause(err) != nil)
+}
+
+// asResolveError converts a guard error that is a failed lookup into a
+// resolveError for host (host may be empty).
+func asResolveError(err error, host string) error {
+	var r *resolveError
+	if errors.As(err, &r) {
+		return err
+	}
+	cause := resolveCause(err)
+	if cause == nil {
+		return err
+	}
+	var d *net.DNSError
+	if host == "" && errors.As(err, &d) {
+		host = d.Name
+	}
+	return &resolveError{host: host, cause: cause}
+}
+
 // blockedError carries a guard refusal across the retry layer. It deliberately
 // has no Unwrap: the retry classifier looks for *net.OpError / *net.DNSError
 // with errors.As and would otherwise treat a refused dial as a transient network
 // failure worth retrying. errors.Is still sees the original chain through Is.
-type blockedError struct {
-	cause   error
-	resolve bool // the refusal was a failed name lookup, not a blocked address
-}
+type blockedError struct{ cause error }
 
 func (e *blockedError) Error() string { return e.cause.Error() }
 
@@ -143,33 +218,73 @@ func (e *blockedError) Is(target error) bool {
 }
 
 // terminalIfBlocked turns a guard refusal into a non-retryable error that still
-// matches ErrSSRFBlocked, and returns every other error unchanged.
+// matches ErrSSRFBlocked, and returns every other error unchanged. A refusal
+// that is only a failed name lookup becomes a resolveError instead: it does not
+// match ErrSSRFBlocked, and its cause stays retryable by the retry layer.
 func terminalIfBlocked(err error) error {
 	if err == nil || !isSSRFBlocked(err) {
 		return err
+	}
+	if resolveCause(err) != nil {
+		return asResolveError(err, "")
 	}
 	var already *blockedError
 	if errors.As(err, &already) {
 		return err
 	}
-	return &blockedError{cause: err, resolve: isResolveFailure(err)}
-}
-
-// isResolveFailure reports whether a guard refusal is a name that did not
-// resolve rather than an address the policy blocks. go-kit fails closed on a
-// lookup error (the host is refused, never dialed), but an unresolvable host is
-// routine for a web fetcher and must not read as an attack in the counter.
-func isResolveFailure(err error) bool {
-	var b *blockedError
-	if errors.As(err, &b) {
-		return b.resolve
-	}
-	var d *net.DNSError
-	return errors.As(err, &d)
+	return &blockedError{cause: err}
 }
 
 // isSSRFBlocked reports whether err is a destination-guard refusal from either
 // the go-kit policy or go-stealth's own guard sentinel.
 func isSSRFBlocked(err error) bool {
 	return errors.Is(err, kithttputil.ErrSSRFBlocked) || errors.Is(err, stealth.ErrSSRFBlocked)
+}
+
+// isRefusal reports whether err ends the fetch of this URL for every tier and
+// fallback: a blocked destination or a destination that did not resolve.
+func isRefusal(err error) bool {
+	return isSSRFBlocked(err) || errors.Is(err, ErrResolveFailed)
+}
+
+// emptyPoolProxy is what [guardedPool] hands go-stealth in place of "", and the
+// proxy the proxy client starts with. Its dial target is "this network" port 0:
+// go-kit's connect-time check refuses it before any connection (and without that
+// check a connect to port 0 fails), so a request that gets it can never reach the
+// destination.
+//
+// Why a dead proxy rather than an unsupported one: tls-client's SetProxy rolls a
+// failed switch back to the previous proxy, and with none set that is a bare
+// direct dialer without the connect-time hook. Starting from a hooked dead proxy
+// means no failure path, an empty pool or a malformed proxy URL alike, ends in an
+// unguarded direct dial.
+const emptyPoolProxy = "http://0.0.0.0:0"
+
+// guardedPool wraps the operator's proxy pool so it never returns "". go-stealth
+// treats "" as "no proxy" and then dials the destination directly through a
+// dialer that carries no connect-time hook, so a DNS rebind would go through.
+// Instead an empty answer becomes emptyPoolProxy, the request fails, and the
+// Fetcher retries it on a guarded direct client (see fetchViaProxy).
+type guardedPool struct {
+	proxypool.ProxyPool
+	emptied atomic.Int64
+}
+
+func newGuardedPool(p proxypool.ProxyPool) *guardedPool { return &guardedPool{ProxyPool: p} }
+
+// Next returns the inner pool's proxy, or emptyPoolProxy if it has none.
+func (p *guardedPool) Next() string {
+	if s := p.ProxyPool.Next(); s != "" {
+		return s
+	}
+	p.emptied.Add(1)
+	return emptyPoolProxy
+}
+
+// emptiedCount is the number of times the inner pool had no proxy to give.
+func (p *guardedPool) emptiedCount() int64 {
+	if p == nil {
+		return 0
+	}
+	return p.emptied.Load()
 }

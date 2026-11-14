@@ -170,7 +170,7 @@ func TestPlainTier_PublicHost_StillFetches(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	f := New(withFixtureNetwork(srv), WithTimeout(5*time.Second), noRetry())
+	f := New(withFixtureNetwork(t, srv), WithTimeout(5*time.Second), noRetry())
 	body, err := f.FetchBody(context.Background(), fixtureURL(srv))
 	if err != nil {
 		t.Fatalf("FetchBody(public host): %v", err)
@@ -215,44 +215,6 @@ func TestFetchBody_BlockedDestination_ReachesNoTier(t *testing.T) {
 	if direct.calls.Load() != 0 || proxy.calls.Load() != 0 || oxHits.Load() != 0 {
 		t.Fatalf("a tier was reached: direct %d, proxy %d, ox-browser %d (want 0 each)",
 			direct.calls.Load(), proxy.calls.Load(), oxHits.Load())
-	}
-}
-
-// errResolver fails every lookup the way the system resolver does for a dead name.
-type errResolver struct{}
-
-func (errResolver) LookupIPAddr(_ context.Context, host string) ([]net.IPAddr, error) {
-	return nil, &net.DNSError{Err: "no such host", Name: host, IsNotFound: true}
-}
-
-// go-kit fails closed on a lookup error: a name that does not resolve is refused
-// before any tier or forwarder, without a retry, and is not counted as an attack.
-// Mutation: fetch/fetcher.go countRefusal, drop the !isResolveFailure(err) clause.
-func TestFetchBody_UnresolvableHost_IsRefusedAndNotCounted(t *testing.T) {
-	var oxHits atomic.Int32
-	ox := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		oxHits.Add(1)
-		w.WriteHeader(http.StatusInternalServerError)
-	}))
-	defer ox.Close()
-	direct := &fakeDoer{status: http.StatusOK, body: largeHTML("x"), hdrs: map[string]string{"content-type": "text/html"}}
-
-	m := &atomicMetrics{}
-	f := newDirectFirstBase()
-	f.guard.resolver = errResolver{}
-	f.directClient = direct
-	f.metrics = m
-	WithOxBrowser(ox.URL)(f)
-
-	_, err := f.FetchBody(context.Background(), "https://dead-host.example.com/")
-	if !errors.Is(err, ErrSSRFBlocked) {
-		t.Fatalf("error = %v, want errors.Is ErrSSRFBlocked (fail closed on a lookup error)", err)
-	}
-	if direct.calls.Load() != 0 || oxHits.Load() != 0 {
-		t.Errorf("a tier was reached for an unresolvable host: direct %d, ox-browser %d", direct.calls.Load(), oxHits.Load())
-	}
-	if got := m.ssrfBlocked.Load(); got != 0 {
-		t.Errorf("ssrf-blocked counter = %d for a name that failed to resolve, want 0", got)
 	}
 }
 

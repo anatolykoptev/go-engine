@@ -34,7 +34,7 @@ func TestFetchBody_OxBrowserSendsInternalSecret(t *testing.T) {
 	defer oxSrv.Close()
 
 	f := New(
-		withFixtureNetwork(primary),
+		withFixtureNetwork(t, primary),
 		WithTimeout(2*time.Second),
 		WithRetryConfig(RetryConfig{
 			MaxRetries:  1,

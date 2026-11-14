@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
+	"testing"
 )
 
 // Test fixtures for the destination guard. They never switch it off: URLs still
@@ -44,6 +45,6 @@ func withFixtureResolver() Option {
 }
 
 // withFixtureNetwork routes the plain tier to srv through WithTestNetwork.
-func withFixtureNetwork(srv *httptest.Server) Option {
-	return WithTestNetwork(srv.Listener.Addr().String())
+func withFixtureNetwork(tb testing.TB, srv *httptest.Server) Option {
+	return WithTestNetwork(tb, srv.Listener.Addr().String())
 }
