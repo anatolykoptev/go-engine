@@ -4564,6 +4564,7 @@ type http2stream struct {
 	state http2streamState
 
 	trailer       Header      // accumulated trailers
+	readDeadline  *time.Timer // nil if unused
 	writeDeadline *time.Timer // nil if unused
 
 	wroteHeaders bool // whether we wrote headers (not status 100)
@@ -4882,6 +4883,8 @@ func (sc *http2serverConn) serve() {
 				}
 			case *http2startPushRequest:
 				sc.startPush(v)
+			case func(*http2serverConn):
+				v(sc)
 			default:
 				panic(fmt.Sprintf("unexpected type %T", v))
 			}
@@ -5507,6 +5510,9 @@ func (sc *http2serverConn) closeStream(st *http2stream, err error) {
 		panic(fmt.Sprintf("invariant; can't close stream in state %v", st.state))
 	}
 	st.state = http2stateClosed
+	if st.readDeadline != nil {
+		st.readDeadline.Stop()
+	}
 	if st.writeDeadline != nil {
 		st.writeDeadline.Stop()
 	}
@@ -5532,6 +5538,7 @@ func (sc *http2serverConn) closeStream(st *http2stream, err error) {
 
 		p.CloseWithError(err)
 	}
+	st.cancelCtx()
 	st.cw.Close() // signals Handler's CloseNotifier, unblocks writes, etc
 	sc.writeSched.CloseStream(st.id)
 }
@@ -5766,6 +5773,16 @@ func (st *http2stream) copyTrailersToHandlerRequest() {
 			// Only copy it over it was pre-declared.
 			st.reqTrailer[k] = vv
 		}
+	}
+}
+
+// onReadTimeout is run on its own goroutine (from time.AfterFunc)
+// when the stream's ReadTimeout has fired.
+func (st *http2stream) onReadTimeout() {
+	if st.body != nil {
+		// Wrap the ErrDeadlineExceeded to avoid callers depending on us
+		// returning the bare error.
+		st.body.CloseWithError(fmt.Errorf("%w", os.ErrDeadlineExceeded))
 	}
 }
 
@@ -6584,6 +6601,62 @@ func (rws *http2responseWriterState) promoteUndeclaredTrailers() {
 		sorter.SortStrings(rws.trailers)
 		http2sorterPool.Put(sorter)
 	}
+}
+
+func (w *http2responseWriter) SetReadDeadline(deadline time.Time) error {
+	st := w.rws.stream
+	if !deadline.IsZero() && deadline.Before(time.Now()) {
+		// If we're setting a deadline in the past, reset the stream immediately
+		// so writes after SetWriteDeadline returns will fail.
+		st.onReadTimeout()
+
+		return nil
+	}
+	w.rws.conn.sendServeMsg(func(sc *http2serverConn) {
+		if st.readDeadline != nil {
+			if !st.readDeadline.Stop() {
+				// Deadline already exceeded, or stream has been closed.
+				return
+			}
+		}
+		if deadline.IsZero() {
+			st.readDeadline = nil
+		} else if st.readDeadline == nil {
+			st.readDeadline = time.AfterFunc(deadline.Sub(time.Now()), st.onReadTimeout)
+		} else {
+			st.readDeadline.Reset(deadline.Sub(time.Now()))
+		}
+	})
+
+	return nil
+}
+
+func (w *http2responseWriter) SetWriteDeadline(deadline time.Time) error {
+	st := w.rws.stream
+	if !deadline.IsZero() && deadline.Before(time.Now()) {
+		// If we're setting a deadline in the past, reset the stream immediately
+		// so writes after SetWriteDeadline returns will fail.
+		st.onWriteTimeout()
+
+		return nil
+	}
+	w.rws.conn.sendServeMsg(func(sc *http2serverConn) {
+		if st.writeDeadline != nil {
+			if !st.writeDeadline.Stop() {
+				// Deadline already exceeded, or stream has been closed.
+				return
+			}
+		}
+		if deadline.IsZero() {
+			st.writeDeadline = nil
+		} else if st.writeDeadline == nil {
+			st.writeDeadline = time.AfterFunc(deadline.Sub(time.Now()), st.onWriteTimeout)
+		} else {
+			st.writeDeadline.Reset(deadline.Sub(time.Now()))
+		}
+	})
+
+	return nil
 }
 
 func (w *http2responseWriter) Flush() {
@@ -8643,6 +8716,41 @@ func (cc *http2ClientConn) encodeHeaders(req *Request, addGzipHeader bool, trail
 		}
 	}
 
+	// Clone, augment and sort the headers once up front: enumerateHeaders
+	// below is called twice (once to count the header list size, once to
+	// write), and this work is identical between the two passes. Cloning
+	// also keeps the added content-length and accept-encoding headers off
+	// the caller's req.Header.
+	hdrs := req.Header.Clone()
+	if hdrs == nil {
+		hdrs = make(Header)
+	}
+	// Content-Length comes from the request, not from the caller's header map, as in net/http.
+	for k := range hdrs {
+		if strings.EqualFold(k, "content-length") {
+			delete(hdrs, k)
+		}
+	}
+	if http2shouldSendReqContentLength(req.Method, contentLength) {
+		hdrs["content-length"] = []string{strconv.FormatInt(contentLength, 10)}
+	}
+
+	// Does not include accept-encoding header if its defined in req.Header
+	if _, ok := hdrs["accept-encoding"]; !ok && addGzipHeader {
+		hdrs["accept-encoding"] = []string{"gzip, deflate, br, zstd"}
+	}
+
+	var kvs []HeaderKeyValues
+	if headerOrder, ok := hdrs[HeaderOrderKey]; ok {
+		order := make(map[string]int, len(headerOrder))
+		for i, v := range headerOrder {
+			order[v] = i
+		}
+		kvs, _ = hdrs.SortedKeyValuesBy(order, nil)
+	} else {
+		kvs, _ = hdrs.SortedKeyValues(nil)
+	}
+
 	enumerateHeaders := func(f func(name, value string)) {
 		// 8.1.2.3 Request Pseudo-Header Fields
 		// The :path pseudo-header field includes the path and query parts of the
@@ -8654,7 +8762,7 @@ func (cc *http2ClientConn) encodeHeaders(req *Request, addGzipHeader bool, trail
 
 		if !ok {
 			pHeaderOrder = cc.t.t1.PseudoHeaderOrder
-			ok = true
+			ok = len(pHeaderOrder) > 0
 		}
 
 		m := req.Method
@@ -8668,7 +8776,7 @@ func (cc *http2ClientConn) encodeHeaders(req *Request, addGzipHeader bool, trail
 				case ":authority":
 					f(":authority", host)
 				case ":method":
-					f(":method", req.Method)
+					f(":method", m)
 				case ":path":
 					if req.Method != "CONNECT" {
 						f(":path", path)
@@ -8696,32 +8804,8 @@ func (cc *http2ClientConn) encodeHeaders(req *Request, addGzipHeader bool, trail
 			f("trailer", trailers)
 		}
 
-		// Should clone, because this function is called twice; to read and to write.
-		// If headers are added to the req, then headers would be added twice.
-		hdrs := req.Header.Clone()
-		if _, ok := req.Header["content-length"]; !ok && http2shouldSendReqContentLength(req.Method, contentLength) {
-			hdrs["content-length"] = []string{strconv.FormatInt(contentLength, 10)}
-		}
-
-		// Does not include accept-encoding header if its defined in req.Header
-		if _, ok := hdrs["accept-encoding"]; !ok && addGzipHeader {
-			hdrs["accept-encoding"] = []string{"gzip, deflate, br"}
-		}
-
 		// Formats and writes headers with f function
 		var didUA bool
-		var kvs []HeaderKeyValues
-
-		if headerOrder, ok := hdrs[HeaderOrderKey]; ok {
-			order := make(map[string]int)
-			for i, v := range headerOrder {
-				order[v] = i
-			}
-			kvs, _ = hdrs.SortedKeyValuesBy(order, make(map[string]bool))
-		} else {
-			kvs, _ = hdrs.SortedKeyValues(make(map[string]bool))
-		}
-
 		for _, kv := range kvs {
 			if strings.EqualFold(kv.Key, "host") {
 				// Host is :authority, already sent.
@@ -8768,7 +8852,7 @@ func (cc *http2ClientConn) encodeHeaders(req *Request, addGzipHeader bool, trail
 					kv.Values = kv.Values[:1]
 				}
 
-				if kv.Values[0] == "" {
+				if len(kv.Values) == 0 || kv.Values[0] == "" {
 					continue
 				}
 			}
@@ -10425,7 +10509,8 @@ type http2WriteScheduler interface {
 
 	// Pop dequeues the next frame to write. Returns false if no frames can
 	// be written. Frames with a given wr.StreamID() are Pop'd in the same
-	// order they are Push'd. No frames should be discarded except by CloseStream.
+	// order they are Push'd, except RST_STREAM frames. No frames should be
+	// discarded except by CloseStream.
 	Pop() (wr http2FrameWriteRequest, ok bool)
 
 	// Push queues a frame in the scheduler. In most cases, this will not be
@@ -10451,6 +10536,7 @@ type http2FrameWriteRequest struct {
 
 	// stream is the stream on which this frame will be written.
 	// nil for non-stream frames like PING and SETTINGS.
+	// nil for RST_STREAM streams, which use the StreamError.StreamID field instead.
 	stream *http2stream
 
 	// write is the interface value that does the writing, once the
@@ -11154,12 +11240,12 @@ func (ws *http2randomWriteScheduler) AdjustStream(streamID uint32, priority http
 }
 
 func (ws *http2randomWriteScheduler) Push(wr http2FrameWriteRequest) {
-	id := wr.StreamID()
-	if id == 0 {
+	if wr.isControl() {
 		ws.zero.push(wr)
 
 		return
 	}
+	id := wr.StreamID()
 	q, ok := ws.sq[id]
 	if !ok {
 		q = ws.queuePool.get()
@@ -11169,7 +11255,7 @@ func (ws *http2randomWriteScheduler) Push(wr http2FrameWriteRequest) {
 }
 
 func (ws *http2randomWriteScheduler) Pop() (http2FrameWriteRequest, bool) {
-	// Control frames first.
+	// Control and RST_STREAM frames first.
 	if !ws.zero.empty() {
 		return ws.zero.shift(), true
 	}

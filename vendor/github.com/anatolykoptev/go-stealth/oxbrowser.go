@@ -5,24 +5,35 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"time"
+
+	"github.com/anatolykoptev/go-kit/svcauth"
 )
 
 // OxBrowserClient calls the ox-browser REST API.
 type OxBrowserClient struct {
 	baseURL string
 	client  *http.Client
+
+	// maxReply bounds one reply read from ox-browser (0 = unbounded). Set by
+	// NewClient from WithMaxBodyBytes: a /fetch-smart reply carries a whole
+	// page body inside its JSON.
+	maxReply int64
 }
 
 // NewOxBrowserClient creates a client for ox-browser at the given base URL.
 // Does NOT route through proxy. Use NewOxBrowserClientWithProxy for stealth scenarios.
+// Requests to ox-browser carry the X-Internal-Secret header from
+// INTERNAL_SERVICE_SECRET when that env var is set (go-kit svcauth); the
+// header is scoped to baseURL's origin and stripped on requests and redirect
+// hops to anywhere else.
 func NewOxBrowserClient(baseURL string) *OxBrowserClient {
 	return &OxBrowserClient{
 		baseURL: baseURL,
-		client:  &http.Client{Timeout: 60 * time.Second},
+		client:  &http.Client{Transport: oxAuthTransport(nil, baseURL), Timeout: 60 * time.Second},
 	}
 }
 
@@ -30,12 +41,31 @@ func NewOxBrowserClient(baseURL string) *OxBrowserClient {
 // all requests (to the ox-browser API itself) through the given proxy function.
 // proxyFn is compatible with http.Transport.Proxy — pass proxyPool.TransportProxy()
 // to ensure each call to ox-browser uses a fresh rotated residential IP.
+//
+// No X-Internal-Secret is attached on this path, by design: a plain-http
+// request to ox-browser transits the external proxy in cleartext, so the
+// secret would be visible to the proxy operator.
 func NewOxBrowserClientWithProxy(baseURL string, proxyFn func(*http.Request) (*url.URL, error)) *OxBrowserClient {
 	transport := &http.Transport{Proxy: proxyFn}
 	return &OxBrowserClient{
 		baseURL: baseURL,
 		client:  &http.Client{Transport: transport, Timeout: 60 * time.Second},
 	}
+}
+
+// oxAuthTransport wraps base so requests to baseURL carry X-Internal-Secret
+// from INTERNAL_SERVICE_SECRET (go-kit svcauth). A nil base means
+// http.DefaultTransport. If svcauth rejects baseURL the base transport is
+// returned unwrapped: the constructors do not validate URLs, so bad input
+// fails at request time exactly as it did before.
+func oxAuthTransport(base http.RoundTripper, baseURL string) http.RoundTripper {
+	t, err := svcauth.FromEnv(base, baseURL)
+	if err != nil {
+		slog.Warn("oxbrowser: cannot scope internal-secret transport, sending unauthenticated",
+			slog.String("base_url", baseURL), slog.Any("error", err))
+		return base
+	}
+	return t
 }
 
 // SolveResponse is the response from /solve.
@@ -126,7 +156,7 @@ func (c *OxBrowserClient) post(ctx context.Context, path string, body []byte, ou
 	}
 	defer resp.Body.Close() //nolint:errcheck // deferred close, error unrecoverable
 
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := readAllLimit(resp.Body, c.maxReply)
 	if err != nil {
 		return fmt.Errorf("ox-browser: read response: %w", err)
 	}

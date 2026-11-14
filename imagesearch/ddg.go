@@ -53,11 +53,9 @@ func (d *DdgImages) Search(ctx context.Context, doer BrowserDoer, query string, 
 	imagesURL := fmt.Sprintf("%s?l=wt-wt&o=json&q=%s&vqd=%s&f=,,,,,&p=1",
 		ddgImagesAPI, url.QueryEscape(query), url.QueryEscape(vqd))
 
-	imgHeaders := searchHeadersFor(doer)
+	imgHeaders := fetchHeadersFor(doer)
 	imgHeaders["referer"] = ddgImagesHome
 	imgHeaders["x-requested-with"] = "XMLHttpRequest"
-	imgHeaders["sec-fetch-site"] = "same-origin"
-	imgHeaders["sec-fetch-mode"] = "cors"
 	imgHeaders["cookie"] = ddgCookie
 
 	imgData, _, imgStatus, err := doer.Do(http.MethodGet, imagesURL, imgHeaders, nil)

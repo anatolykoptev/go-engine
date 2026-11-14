@@ -3,6 +3,7 @@ package stealth
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -14,6 +15,7 @@ type ClientOption func(*clientConfig)
 type clientConfig struct {
 	proxyURL           string
 	proxyPool          ProxyPoolProvider
+	poolCloser         io.Closer // set only when an option created the pool itself (client-owned; caller-supplied pools are never closed)
 	profile            TLSProfile
 	identity           *BrowserIdentity
 	timeout            int
@@ -21,8 +23,13 @@ type clientConfig struct {
 	followRedirs       bool
 	debug              bool
 	backend            BackendFactory
+	callerBackend      bool                 // true when backend came from WithBackend: the caller owns that doer and Close leaves it alone
+	newHTTPClient      tlsHTTPClientFactory // test seam, per client; nil = tls_client.NewHttpClient
 	http3              bool
+	fetchMode          bool
 	insecureSkipVerify bool
+	cookieJar          http.CookieJar // WithCookieJar; nil = backend default jar
+	maxBodyBytes       int64          // WithMaxBodyBytes; 0 = unbounded
 	blockRetries       int
 	cookieProvider     CookieProvider
 	oxBrowserURL       string
@@ -39,19 +46,13 @@ type clientConfig struct {
 
 func defaultConfig() *clientConfig {
 	return &clientConfig{
-		// The default profile stays ProfileChrome131, NOT the newest Chrome
-		// profile, on purpose. go-stealth's default profile is an implicit
-		// cross-repo contract: consumers that call NewClient() with no
-		// WithProfile pair this default JA3 with their OWN hardcoded
-		// User-Agent (e.g. go-twitter pins DefaultUserAgent to Chrome/131 and
-		// rides the bare default on its guest/pool path). Bumping the library
-		// default to a newer Chrome profile without bumping every consumer's
-		// hardcoded UA in lockstep produces a Chrome/<old> UA over a
-		// Chrome_<new> JA3 — the exact UA<->JA3 mismatch this package exists
-		// to eliminate. The newer Chrome profiles (144/146) remain available
-		// via explicit WithProfile; flip this default only in the same
-		// coordinated change that bumps every consumer's pinned UA.
-		profile:         ProfileChrome131,
+		// The default is the newest Chrome profile whose fingerprint has been
+		// measured against the real browser (chrome_156). A
+		// consumer that calls NewClient() with no WithProfile and pairs the
+		// default JA3 with its own hardcoded User-Agent must take the UA from
+		// Identity().UserAgent (or UserAgentForProfile) instead, or it will
+		// present an old Chrome UA over this newer fingerprint.
+		profile:         ProfileChrome156,
 		timeout:         20,
 		dialControl:     defaultDenyDial,
 		redirectGuard:   defaultDenyRedirect,
@@ -66,9 +67,15 @@ func WithProxy(url string) ClientOption {
 	}
 }
 
-// WithProfile sets the TLS client profile for fingerprint impersonation.
+// WithProfile sets the TLS client profile for fingerprint impersonation. The
+// zero value "" means "no preference" and keeps the default profile; a
+// non-empty name with no backend mapping makes NewClient fail with
+// ErrUnknownTLSProfile.
 func WithProfile(p TLSProfile) ClientOption {
 	return func(c *clientConfig) {
+		if p == "" {
+			return
+		}
 		c.profile = p
 	}
 }
@@ -91,7 +98,60 @@ func WithIdentity(id BrowserIdentity) ClientOption {
 			id.ClientHints = ClientHintsHeaders(id.UserAgent)
 		}
 		c.identity = &id
-		c.profile = id.TLSProfile
+		if id.TLSProfile != "" {
+			c.profile = id.TLSProfile
+		}
+	}
+}
+
+// WithFetchMode makes the client behave like a Chrome page issuing fetch()
+// and XMLHttpRequest calls rather than top-level navigations (the default).
+// Two things change, and both match what Chrome sends for such requests:
+//
+//   - HTTP/2: the HEADERS frame carries exclusive priority weight 220
+//     instead of the navigation weight 256.
+//   - Headers: a request without its own "priority" header gets
+//     "priority: u=1, i". A priority header the caller sets is kept as is.
+//
+// The mode belongs to the whole client because HTTP/2 priority is a property
+// of the connection's transport, not of a single request; a caller that
+// mixes navigations and fetches builds one client of each (they then use
+// separate connections, which Chrome does not). The cookie jar is per client.
+//
+// It needs a Chrome-family TLS profile (chrome_*, brave_*) and a Chromium
+// identity (chrome, edge, brave); on Firefox or Safari, or an identity that
+// names one of them, NewClient returns ErrFetchModeUnsupported rather than
+// present a Chrome request shape over another browser's fingerprint. It is opt-in for every
+// profile, chrome_131 included: without it the wire is unchanged. With
+// WithStdHTTP only the header part applies (net/http cannot set a priority).
+func WithFetchMode() ClientOption {
+	return func(c *clientConfig) {
+		c.fetchMode = true
+	}
+}
+
+// WithCookieJar makes the client store and send cookies through jar instead of
+// its own private jar. Pass the same jar to several clients to share one
+// cookie store, as the tabs and workers of one browser do: a cookie set by a
+// response to one client is sent by the next request of another.
+//
+// The jar decides everything about a cookie: which domain and path it is
+// scoped to, expiry and deletion (a cookie set with MaxAge < 0 is removed),
+// and the order cookies are sent in. net/http/cookiejar orders them as RFC 6265
+// does and as Chrome does: longer path first, then earliest creation, so
+// cookies from one response keep their Set-Cookie order. The caller can seed,
+// read or delete cookies by calling the jar directly, which lets it drop an
+// explicit Cookie header (a Cookie header set on a request is sent in addition
+// to the jar's cookies, so a cookie in both is sent twice).
+//
+// The jar must be safe for concurrent use (net/http/cookiejar is). A nil jar
+// keeps the default per-client jar. The tls-client default jar is not changed:
+// it keys cookies by the last two host labels, ignores Domain and Path, and
+// returns one response's cookies in reverse Set-Cookie order. Works with both
+// backends and does not touch the TLS or HTTP/2 wire.
+func WithCookieJar(jar http.CookieJar) ClientOption {
+	return func(c *clientConfig) {
+		c.cookieJar = jar
 	}
 }
 
@@ -99,6 +159,35 @@ func WithIdentity(id BrowserIdentity) ClientOption {
 func WithTimeout(seconds int) ClientOption {
 	return func(c *clientConfig) {
 		c.timeout = seconds
+	}
+}
+
+// WithMaxBodyBytes bounds the response body Do returns to n bytes, measured
+// after content-decoding (gzip, deflate, zstd). Reading stops at n+1 bytes:
+// a larger body is neither buffered nor drained, the connection is closed, and
+// Do returns an error that satisfies errors.Is(err, ErrBodyTooLarge). A
+// highly compressed body is stopped while it is being decoded, so a small
+// payload cannot expand past n. A body of exactly n bytes is returned whole.
+//
+// The limit covers every request the client makes: Do, DoCtx,
+// DoWithHeaderOrder, RoundTrip, each redirect hop's final response, and a
+// body replaced by the ox-browser fallback. The error is never retried on
+// another proxy. A backend from WithBackend is handed the limit in
+// BackendConfig.MaxBodyBytes and must enforce it itself, for example by
+// reading its body with ReadBodyLimit: the client's check on the finished
+// body only rejects it, it cannot prevent a backend that ignores the limit
+// from allocating the whole body first.
+//
+// n must be positive; NewClient returns an error otherwise. Without this
+// option the body is read in full, as before.
+func WithMaxBodyBytes(n int64) ClientOption {
+	return func(c *clientConfig) {
+		if n <= 0 {
+			c.buildErrors = append(c.buildErrors,
+				fmt.Errorf("stealth: WithMaxBodyBytes: limit must be positive, got %d", n))
+			return
+		}
+		c.maxBodyBytes = n
 	}
 }
 
@@ -134,9 +223,12 @@ func WithProxyPool(pool ProxyPoolProvider) ClientOption {
 
 // WithBackend sets a custom backend factory for creating the HTTPDoer.
 // If not set, the default bogdanfinn/tls-client backend is used.
+// The backend owns reading the response body, so it must honour
+// BackendConfig.MaxBodyBytes (WithMaxBodyBytes) itself; see ReadBodyLimit.
 func WithBackend(factory BackendFactory) ClientOption {
 	return func(c *clientConfig) {
 		c.backend = factory
+		c.callerBackend = factory != nil // nil factory = client builds the default backend
 	}
 }
 
@@ -189,6 +281,9 @@ func WithCookieSolver(provider CookieProvider) ClientOption {
 // If no CookieProvider is already set, adds OxBrowserSolver + CloudflareDetectMiddleware.
 // Always adds SmartFetchMiddleware as a fallback for CF-challenged responses.
 // url is the ox-browser base URL (e.g. "http://127.0.0.1:8901").
+// Calls to ox-browser carry X-Internal-Secret from INTERNAL_SERVICE_SECRET
+// when set — unless a proxy pool routes them through an external proxy, where
+// the header would transit the proxy and is not sent.
 func WithOxBrowser(url string) ClientOption {
 	return func(c *clientConfig) {
 		c.oxBrowserURL = url
@@ -202,7 +297,13 @@ func WithOxBrowser(url string) ClientOption {
 // A nil fn disables the connect-time guard.
 //
 // On a PROXIED client this hook sees only the proxy's address, never the real
-// target — pair it with WithRequestURLGuard (tier 3), which does.
+// target — pair it with WithRequestURLGuard (tier 3), which does. The client
+// passes the configured proxy's own endpoint (its resolved addresses and port,
+// following SetProxy) without consulting fn, so a proxy on a private address
+// stays reachable; every other address still goes through fn. The consequence:
+// a stricter caller guard is bypassed for those proxy endpoints (every proxy
+// set on this client recently, at most the last 64 distinct URLs), because
+// they are operator configuration.
 func WithDialControl(fn func(network, address string) error) ClientOption {
 	return func(c *clientConfig) {
 		c.dialControl = tagGuardErr2(fn)

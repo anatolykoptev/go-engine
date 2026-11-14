@@ -1,15 +1,16 @@
 # go-stealth
 
-[![Go 1.26+](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go)](go.mod)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Go 1.27+](https://img.shields.io/badge/Go-1.27+-00ADD8?logo=go)](go.mod)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
-Generic anti-ban toolkit for Go — TLS fingerprinting, proxy rotation, rate limiting, middleware, session management, and a generic pool with health tracking.
+A Go toolkit for HTTP clients that must present as a real browser: TLS fingerprinting, proxy rotation, rate limiting, middleware, session management, and a generic pool with health tracking.
 
-**Not a scraping framework** — a reusable HTTP layer that makes any Go HTTP client look like a real browser.
+It is a reusable HTTP layer, not an application: it carries no crawling or parsing logic.
 
 ## Features
 
-- **TLS Fingerprinting** — 18 browser profiles (Chrome, Firefox, Safari, Edge) across 5 OS via [tls-client](https://github.com/bogdanfinn/tls-client)
+- **TLS Fingerprinting** — browser profiles via [tls-client](https://github.com/bogdanfinn/tls-client): Chrome (up to `chrome_156`), Firefox, Safari, Brave and Edge, across macOS, Windows, Linux, Android and iOS; `BuiltinProfiles` lists the User-Agent paired with each
+- **Default-deny SSRF guard** — a client refuses loopback, private, link-local and cloud-metadata targets at connect time and on redirects unless you replace the guard (`WithDialControl`, `WithRedirectGuard`, `WithRequestURLGuard`) or opt out with `WithoutSSRFGuard`
 - **Proxy Rotation** — static list or [Webshare](https://www.webshare.io/) API, per-proxy health tracking with auto-skip
 - **Rate Limiting** — per-key sliding window + per-domain limiter with wildcard matching
 - **Middleware** — composable Handler/Middleware/Chain pattern (logging, retry, rate limit, client hints)
@@ -27,8 +28,9 @@ go get github.com/anatolykoptev/go-stealth
 ## Quick Start
 
 ```go
+p := stealth.RandomProfile(stealth.WithBrowser("chrome"))
 client, _ := stealth.NewClient(
-    stealth.WithProfile(stealth.RandomProfile()),
+    stealth.WithIdentity(stealth.BrowserIdentity{BrowserProfile: p}), // TLS profile + User-Agent together
 )
 body, headers, status, err := client.Do("GET", "https://example.com", nil, nil)
 ```
@@ -62,6 +64,18 @@ pool, _ := proxypool.NewWebshareRotating(os.Getenv("WEBSHARE_USER"), os.Getenv("
 
 The pool round-robins across all entries. With multiple countries, each base proxy is duplicated per country so rotations naturally spread across geographies.
 
+### Bounding the Response Body
+
+`Do` buffers the whole body. `WithMaxBodyBytes` caps it, measured after gzip, deflate and zstd decoding: reading stops one byte past the cap, the connection is closed, and `Do` returns an error that matches `errors.Is(err, stealth.ErrBodyTooLarge)`. A small compressed payload that expands past the cap is stopped while it decodes.
+
+```go
+client, _ := stealth.NewClient(stealth.WithMaxBodyBytes(10 << 20))
+_, _, _, err := client.Do("GET", "https://example.com/big", nil, nil)
+if errors.Is(err, stealth.ErrBodyTooLarge) { /* skip it */ }
+```
+
+A custom backend (`WithBackend`) must enforce `BackendConfig.MaxBodyBytes` itself; the client's check after the backend returns only rejects an oversized body, it cannot prevent the allocation. `stealth.ReadBodyLimit(resp.Body, cfg.MaxBodyBytes)` is a drop-in for `io.ReadAll` that does this.
+
 ### As http.RoundTripper
 
 ```go
@@ -75,18 +89,19 @@ resp, err := client.StdClient().Get("https://example.com")
 client, _ := stealth.NewClient()
 client.Use(stealth.LoggingMiddleware)
 client.Use(stealth.RetryMiddleware(stealth.DefaultRetryConfig))
-client.Use(stealth.RateLimitMiddleware(ratelimit.NewLimiter(ratelimit.DefaultConfig)))
+client.Use(stealth.RateLimitMiddleware(ratelimit.NewDomainLimiter(
+    ratelimit.DomainConfig{Domain: "*.example.com", RequestsPerWindow: 30, WindowDuration: time.Minute},
+)))
 ```
 
 ### Rate Limiting
 
 ```go
-limiter := ratelimit.NewDomainLimiter(ratelimit.DomainConfig{
-    Rules: map[string]ratelimit.Config{
-        "api.example.com": {RequestsPerWindow: 10, WindowDuration: time.Minute},
-        "*.example.com":   {RequestsPerWindow: 30, WindowDuration: time.Minute},
-    },
-})
+// Rules are checked in order; the first matching rule wins.
+limiter := ratelimit.NewDomainLimiter(
+    ratelimit.DomainConfig{Domain: "api.example.com", RequestsPerWindow: 10, WindowDuration: time.Minute},
+    ratelimit.DomainConfig{Domain: "*.example.com", RequestsPerWindow: 30, WindowDuration: time.Minute},
+)
 limiter.Wait(ctx, "https://api.example.com/v1/users")
 ```
 
@@ -142,13 +157,77 @@ go run ./cmd/fingerprint-capture -major 146   # amd64 host; no arm64 Chrome-for-
 See `testdata/README.md` for the headless caveat and the per-metric provenance
 contract.
 
+## Fetch mode
+
+By default a request is shaped like a top-level navigation (HTTP/2 priority
+weight 256, `priority: u=0, i`). `stealth.WithFetchMode()` makes a client send
+what Chrome sends for `fetch()` and XMLHttpRequest instead: weight 220 and
+`priority: u=1, i` (a priority header you set yourself is kept). The mode is
+per client because tls-client holds the HTTP/2 priority on the profile; build
+one client of each kind if you mix navigations and fetches. It needs a Chrome
+family profile and is opt-in for every profile, `chrome_131` included.
+
+## Request headers for an identity
+
+One place builds the browser request headers, so callers do not hand-copy a
+User-Agent, `sec-ch-ua` string or `accept` value that goes stale:
+
+- `stealth.DefaultProfile()` and `stealth.DefaultIdentity()` are what `NewClient()`
+  presents, without building a client.
+- `identity.RequestHeaders(stealth.HeaderOptions{...})` (or `client.RequestHeaders`)
+  returns the header values and their Chrome order for a navigation
+  (`FetchNavigate`) or a page `fetch()`/XMLHttpRequest (`FetchCORS`), with an
+  optional `AcceptLanguage`, `Site` and `OmitAcceptEncoding`. Pass `Order` to
+  `WithHeaderOrder`. The values and order are tested against the Chrome 156
+  captures in `testdata/wire`.
+- `identity.UserAgentData(fullVersion)` is the same brand list as structured
+  data (`brands`, `fullVersionList`) for a DevTools Protocol session.
+- `stealth.HonestUserAgent(name, version, contact)` names the calling program
+  for plain `net/http` callers whose TLS is Go's own.
+- `RandomUserAgent` and the package-level `ChromeHeaders` are deprecated: they
+  can name a browser other than the one the client's TLS fingerprint shows. Use
+  `RandomChromeUserAgent` or the client's `Identity()`.
+
+## Wire check against a real browser
+
+`make fingerprint-wire` (build tag `wirelive`, network required, unreachable
+endpoint fails) measures `chrome_156`, the default client, `chrome_152`,
+fetch mode and `chrome_131` through tls.peet.ws and diffs JA4, ja4_r,
+peetprint, the HTTP/2 fingerprint and priority against the captures in
+`testdata/wire` (installed Google Chrome 156.0.8078.80; Chrome for Testing
+131 for information). JA3 must vary across connections for the modern
+profiles, as in Chrome, and stay constant for `chrome_131`. Offline,
+`wire_*_test.go` capture the ClientHello and first HTTP/2 frames on a local
+listener and pin the `chrome_131` wire byte for byte.
+
 ## Used By
 
-- [go-twitter](https://github.com/anatolykoptev/go-twitter) — Twitter/X scraping
-- [go-threads](https://github.com/anatolykoptev/go-threads) — Threads.net scraping
-- [go-search](https://github.com/anatolykoptev/go-search) — Web search MCP server
-- [go-hully](https://github.com/anatolykoptev/go-hully) — Crypto intelligence
+- [go-twitter](https://github.com/anatolykoptev/go-twitter) — a Twitter/X client
+- [go-threads](https://github.com/anatolykoptev/go-threads) — a Threads client
+
+Plus private services in the same fleet: a web-search MCP server and a crypto-intelligence pipeline.
+
+## Configuration
+
+The library reads no configuration file. Everything is passed as options
+(`NewClient(...)`, `pool.Config`, `proxypool.WebshareConfig`). The only environment variable it
+reads itself is `INTERNAL_SERVICE_SECRET`, which `WithOxBrowser` sends as `X-Internal-Secret` to
+the ox-browser service when set (it is not sent through an external proxy). Names such as
+`WEBSHARE_API_KEY` in the examples are the caller's own.
+
+## Development
+
+```sh
+make preflight           # gofmt -s, go vet, build, race tests, then three non-race live tests
+make lint                # golangci-lint
+make fingerprint         # TLS/HTTP2 oracle, network, not part of preflight
+make fingerprint-wire    # wire check against real-browser captures, network
+```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) and, for every document in the repository,
+[docs/INDEX.md](docs/INDEX.md). Releases and the changelog are produced by release-please from
+Conventional Commits.
 
 ## License
 
-MIT
+Apache-2.0, see [LICENSE](LICENSE).

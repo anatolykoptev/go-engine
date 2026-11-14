@@ -1,25 +1,32 @@
 package imagesearch
 
-import stealth "github.com/anatolykoptev/go-stealth"
+import (
+	stealth "github.com/anatolykoptev/go-stealth"
 
-// searchHeadersFor returns Chrome-like headers without accept-encoding, with
-// the User-Agent derived from d's identity so it agrees with the JA3
-// fingerprint the presenting stealth client sends. d is the BrowserDoer the
-// caller will issue the request through; pass nil to resolve from the default
-// profile (ProfileChrome131).
+	"github.com/anatolykoptev/go-engine/internal/chromehdr"
+)
+
+// searchHeadersFor returns the Chrome navigation headers for the client d
+// presents (go-stealth's canonical set, see internal/chromehdr), without
+// accept-encoding. d is the BrowserDoer the caller will issue the request
+// through; nil or a test mock gets go-stealth's default profile.
 //
 // Go's http.Client handles decompression automatically when accept-encoding
 // is not explicitly set; setting it manually disables auto-decompression
 // and causes regex parsers to fail on compressed responses.
 func searchHeadersFor(d any) map[string]string {
-	h := stealth.ChromeHeaders()
-	if bc, ok := d.(*stealth.BrowserClient); ok && bc != nil {
-		h["user-agent"] = bc.Identity().UserAgent
-	} else {
-		h["user-agent"] = stealth.UserAgentForProfile(stealth.ProfileChrome131)
-	}
-	delete(h, "accept-encoding")
-	return h
+	return chromehdr.ForOptions(d, stealth.HeaderOptions{OmitAcceptEncoding: true})
+}
+
+// fetchHeadersFor returns the headers of a page-issued fetch() to the page's
+// own origin (an XHR-style JSON call), without accept-encoding, for the client
+// d presents.
+func fetchHeadersFor(d any) map[string]string {
+	return chromehdr.ForOptions(d, stealth.HeaderOptions{
+		Mode:               stealth.FetchCORS,
+		Site:               stealth.FetchSiteSameOrigin,
+		OmitAcceptEncoding: true,
+	})
 }
 
 // androidHeaders returns headers mimicking the Google Go Android app.

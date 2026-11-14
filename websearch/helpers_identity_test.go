@@ -12,7 +12,7 @@ var chromeMajorRE = regexp.MustCompile(`Chrome/(\d+)`)
 // chromeMajor extracts the Chrome major version token from a User-Agent
 // string (e.g. "Chrome/131.0.0.0" -> "131"). Fatals if absent — every UA in
 // this invariant's domain is Chromium-based by construction (the fleet's
-// stealth clients all use ProfileChrome131, a Chrome TLS profile).
+// stealth clients all use ProfileChrome156, a Chrome TLS profile).
 func chromeMajor(t *testing.T, ua string) string {
 	t.Helper()
 	m := chromeMajorRE.FindStringSubmatch(ua)
@@ -42,8 +42,8 @@ func chromeMajor(t *testing.T, ua string) string {
 func TestChromeHeadersFor_MatchesDefaultProfileChromeMajor(t *testing.T) {
 	t.Parallel()
 	// The default profile every stealth.NewClient() in this repo installs
-	// when no WithProfile is given (stealth defaultConfig: ProfileChrome131).
-	profileUA := stealth.UserAgentForProfile(stealth.ProfileChrome131)
+	// when no WithProfile is given (stealth defaultConfig: ProfileChrome156).
+	profileUA := stealth.UserAgentForProfile(stealth.ProfileChrome156)
 	wantMajor := chromeMajor(t, profileUA)
 
 	// Nil fallback: no *stealth.BrowserClient in hand (tests, ad-hoc).
@@ -54,7 +54,7 @@ func TestChromeHeadersFor_MatchesDefaultProfileChromeMajor(t *testing.T) {
 	}
 
 	// Identity path: a default-constructed BrowserClient (no WithProfile →
-	// ProfileChrome131, exactly as fetch/fetcher.go:200/215 builds it).
+	// ProfileChrome156, exactly as fetch/fetcher.go:200/215 builds it).
 	bc, err := stealth.NewClient()
 	if err != nil {
 		t.Fatalf("stealth.NewClient() error: %v", err)

@@ -68,6 +68,11 @@ func (b *Bing) Search(ctx context.Context, query string, opts SearchOpts) ([]Res
 
 	headers := ChromeHeadersFor(b.browser)
 	headers["referer"] = bingReferer
+	// The plain HTML Accept stays. Measured on a datacenter egress, a
+	// persistent Bing session sent go-stealth's long navigation Accept was
+	// served the degraded SERP (results matching one template word of the
+	// query) more often than one sent this value, and never less often; a
+	// fresh session showed no difference.
 	headers["accept"] = acceptHTML
 
 	data, _, status, err := b.browser.Do(http.MethodGet, u, headers, nil)

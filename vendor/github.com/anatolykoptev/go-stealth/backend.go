@@ -11,12 +11,16 @@ const (
 	ProfileChrome133   TLSProfile = "chrome_133"
 	ProfileChrome144   TLSProfile = "chrome_144"
 	ProfileChrome146   TLSProfile = "chrome_146"
+	ProfileChrome150   TLSProfile = "chrome_150"
+	ProfileChrome152   TLSProfile = "chrome_152"
+	ProfileChrome156   TLSProfile = "chrome_156"
 	ProfileFirefox133  TLSProfile = "firefox_133"
 	ProfileFirefox148  TLSProfile = "firefox_148"
 	ProfileBrave146    TLSProfile = "brave_146"
 	ProfileSafari16    TLSProfile = "safari_16_0"
 	ProfileSafariIOS18 TLSProfile = "safari_ios_18_0"
 	ProfileSafariIOS17 TLSProfile = "safari_ios_17_0"
+	ProfileSafariIOS26 TLSProfile = "safari_ios_26_0"
 )
 
 // BackendConfig holds backend-agnostic configuration for creating an HTTPDoer.
@@ -26,6 +30,14 @@ type BackendConfig struct {
 	TimeoutSeconds  int
 	FollowRedirects bool
 	HTTP3           bool
+
+	// FetchMode requests the fetch/XHR request shape: HTTP/2 priority weight
+	// 220 on HEADERS instead of the navigation weight 256 (see WithFetchMode).
+	FetchMode bool
+
+	// CookieJar, when non-nil, replaces the backend's own cookie jar (see
+	// WithCookieJar). nil = each backend's default jar.
+	CookieJar http.CookieJar
 
 	// InsecureSkipVerify, when true, disables TLS certificate verification.
 	// Honored by the tls-client backend; the std backend verifies by default
@@ -43,6 +55,19 @@ type BackendConfig struct {
 	// backend; an fhttp→stdlib-adapted WithCustomRedirectFunc on the tls
 	// backend). It must re-own the redirect hop cap.
 	RedirectGuard func(req *http.Request, via []*http.Request) error
+
+	// MaxBodyBytes, when > 0, bounds the decoded response body (see
+	// WithMaxBodyBytes): a backend must stop reading at MaxBodyBytes+1 bytes,
+	// close the connection and return an error wrapping ErrBodyTooLarge.
+	// 0 = unbounded. A custom backend must enforce it itself (ReadBodyLimit
+	// bounds a read in one call): the client's check after the backend
+	// returns only rejects an oversized body, it cannot stop the backend
+	// from allocating it.
+	MaxBodyBytes int64
+
+	// newHTTPClient is a per-client test seam for the tls-client constructor
+	// (nil = tls_client.NewHttpClient). Unexported, so callers cannot set it.
+	newHTTPClient tlsHTTPClientFactory
 }
 
 // HTTPDoer executes HTTP requests. TLS backends implement this interface.
@@ -54,3 +79,9 @@ type HTTPDoer interface {
 
 // BackendFactory creates an HTTPDoer from configuration.
 type BackendFactory func(cfg BackendConfig) (HTTPDoer, error)
+
+// idleCloser is optionally implemented by backends that can drop their idle
+// connections without disturbing requests in flight.
+type idleCloser interface {
+	CloseIdleConnections()
+}

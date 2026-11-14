@@ -6,7 +6,7 @@ import (
 	"regexp"
 	"strings"
 
-	stealth "github.com/anatolykoptev/go-stealth"
+	"github.com/anatolykoptev/go-engine/internal/chromehdr"
 )
 
 var reHTMLTag = regexp.MustCompile(`<[^>]*>`)
@@ -23,48 +23,18 @@ func CleanHTML(s string) string {
 	return strings.TrimSpace(reHTMLTag.ReplaceAllString(s, ""))
 }
 
-// resolveUserAgent returns the User-Agent that matches the TLS fingerprint
-// the fleet's stealth client presents. When d is a *stealth.BrowserClient
-// (the production concrete type behind every websearch.BrowserDoer),
-// Identity().UserAgent is the exact UA paired with the installed TLS profile
-// — the matched pair go-stealth guarantees by construction. When d is nil or
-// a test mock (no *stealth.BrowserClient concrete type), the UA is resolved
-// from the default TLS profile (ProfileChrome131 — the profile every
-// stealth.NewClient() in this repo installs, since no callsite uses
-// WithProfile) via UserAgentForProfile, so the UA matches the fleet's
-// canonical identity regardless.
-//
-// This replaces the former chromeUserAgents hardcoded pool, which rotated
-// through Chrome 131/130, Safari 17.2, and Firefox 115 UAs over a Chrome 131
-// JA3 — a self-inconsistent pair (no real Firefox 115 produces a Chrome 131
-// handshake) that was a stronger bot signal than being merely out of date.
-func resolveUserAgent(d any) string {
-	if bc, ok := d.(*stealth.BrowserClient); ok && bc != nil {
-		return bc.Identity().UserAgent
-	}
-	return stealth.UserAgentForProfile(stealth.ProfileChrome131)
-}
-
-// ChromeHeadersFor returns browser-like HTTP headers for direct fetching,
-// with the User-Agent derived from d's identity so it agrees with the JA3
-// fingerprint the presenting stealth client actually sends. d is the
-// BrowserDoer the caller will issue the request through; pass nil to resolve
-// from the default profile (ProfileChrome131).
+// ChromeHeadersFor returns the Chrome navigation headers for the browser d
+// presents: go-stealth's canonical set for that client's identity (see
+// internal/chromehdr). d is the BrowserDoer the caller will issue the request
+// through; nil or a test mock gets go-stealth's default profile.
 func ChromeHeadersFor(d any) map[string]string {
-	return map[string]string{
-		"accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-		"accept-language": "en-US,en;q=0.9",
-		"accept-encoding": "gzip, deflate, br",
-		"user-agent":      resolveUserAgent(d),
-	}
+	return chromehdr.For(d)
 }
 
-// ChromeHeaders returns browser-like HTTP headers for direct fetching.
+// ChromeHeaders returns the Chrome navigation headers for the default profile.
 //
 // Deprecated: use ChromeHeadersFor(d) with the request's BrowserDoer so the
-// User-Agent is derived from the client's identity instead of the default
-// profile. Kept for backward compatibility and for callers without a doer in
-// hand (tests, ad-hoc fetching).
+// headers describe the client's own identity.
 func ChromeHeaders() map[string]string {
 	return ChromeHeadersFor(nil)
 }
