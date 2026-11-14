@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
+	stealth "github.com/anatolykoptev/go-stealth"
 )
 
 const (
@@ -46,6 +47,19 @@ func BingSearchURL(query string, opts ...SearchOpts) string {
 	return u
 }
 
+// addBingClientHints adds the Sec-CH-UA client hints that a real Chrome sends
+// with every navigation, derived from the User-Agent already in h so the two
+// agree. Bing treats a Chrome User-Agent without them as a non-browser client
+// and answers natural-language queries from a degraded ranker: a ~120 KB
+// SERP whose results all match one template word of the query ("parts",
+// "explain", "does", "difference") instead of its topic, where the same
+// request with the hints gets the full ~400 KB SERP and topical results.
+func addBingClientHints(h map[string]string) {
+	for k, v := range stealth.ClientHintsHeaders(h["user-agent"]) {
+		h[k] = v
+	}
+}
+
 // NewBing creates a Bing Search scraper. A BrowserDoer must be provided via WithBingBrowser.
 func NewBing(opts ...BingOption) *Bing {
 	b := &Bing{}
@@ -69,6 +83,7 @@ func (b *Bing) Search(ctx context.Context, query string, opts SearchOpts) ([]Res
 	headers := ChromeHeadersFor(b.browser)
 	headers["referer"] = bingReferer
 	headers["accept"] = acceptHTML
+	addBingClientHints(headers)
 
 	data, _, status, err := b.browser.Do(http.MethodGet, u, headers, nil)
 	if err != nil {
