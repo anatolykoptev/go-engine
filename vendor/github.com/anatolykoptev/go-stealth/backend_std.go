@@ -3,7 +3,6 @@ package stealth
 import (
 	"crypto/tls"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"net/http/cookiejar"
@@ -17,11 +16,18 @@ import (
 type stdDoer struct {
 	client *http.Client
 	jar    http.CookieJar
+
+	// maxBody bounds the decoded response body (0 = unbounded); see
+	// BackendConfig.MaxBodyBytes.
+	maxBody int64
 }
 
 // newStdBackend creates an HTTPDoer backed by standard net/http.
 func newStdBackend(cfg BackendConfig) (HTTPDoer, error) {
-	jar, _ := cookiejar.New(nil)
+	jar := cfg.CookieJar
+	if jar == nil {
+		jar, _ = cookiejar.New(nil)
+	}
 
 	transport := &http.Transport{}
 	if cfg.InsecureSkipVerify {
@@ -59,7 +65,7 @@ func newStdBackend(cfg BackendConfig) (HTTPDoer, error) {
 		client.CheckRedirect = cfg.RedirectGuard
 	}
 
-	return &stdDoer{client: client, jar: jar}, nil
+	return &stdDoer{client: client, jar: jar, maxBody: cfg.MaxBodyBytes}, nil
 }
 
 func (s *stdDoer) Do(req *Request) (*Response, error) {
@@ -79,7 +85,9 @@ func (s *stdDoer) Do(req *Request) (*Response, error) {
 	}
 	defer resp.Body.Close()
 
-	rawData, err := io.ReadAll(resp.Body)
+	// Closing an unread body (deferred above) drops the connection instead of
+	// draining it, so an oversized body stops costing bytes at the limit.
+	rawData, err := readAllLimit(resp.Body, wireLimit(s.maxBody, resp.Header.Get("Content-Encoding")))
 	if err != nil {
 		return &Response{StatusCode: resp.StatusCode}, fmt.Errorf("read body: %w", err)
 	}
@@ -94,12 +102,27 @@ func (s *stdDoer) Do(req *Request) (*Response, error) {
 		}
 	}
 
-	data, err := decompressBody(rawData, respHeaders["content-encoding"])
+	data, err := decodeBody(rawData, respHeaders["content-encoding"], s.maxBody)
 	if err != nil {
 		return &Response{StatusCode: resp.StatusCode}, fmt.Errorf("decompress body: %w", err)
 	}
 
 	return &Response{Body: data, Headers: respHeaders, StatusCode: resp.StatusCode}, nil
+}
+
+// Close releases the transport's idle connections. newStdBackend's transport
+// has no idle timeout, so without this a discarded client keeps them open
+// indefinitely. A connection serving a request is left to finish; a Do after
+// Close opens new connections that nothing closes; Close must not run
+// concurrently with Do.
+func (s *stdDoer) Close() error {
+	s.client.CloseIdleConnections()
+	return nil
+}
+
+// CloseIdleConnections closes the transport's idle connections only.
+func (s *stdDoer) CloseIdleConnections() {
+	s.client.CloseIdleConnections()
 }
 
 func (s *stdDoer) SetProxy(proxyURL string) error {

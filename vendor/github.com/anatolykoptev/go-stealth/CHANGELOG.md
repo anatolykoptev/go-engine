@@ -1,5 +1,110 @@
 # Changelog
 
+## [1.29.0](https://github.com/anatolykoptev/go-stealth/compare/v1.28.2...v1.29.0) (2026-11-14)
+
+
+### Added
+
+* WithMaxBodyBytes bounds the response body ([#92](https://github.com/anatolykoptev/go-stealth/issues/92)) ([6e22e4c](https://github.com/anatolykoptev/go-stealth/commit/6e22e4c074e90c6d7d2d6d259b37213b4a83cc6c))
+
+## [1.28.2](https://github.com/anatolykoptev/go-stealth/compare/v1.28.1...v1.28.2) (2026-11-11)
+
+
+### Documentation
+
+* bring repository documents up to the repo-standards set ([#84](https://github.com/anatolykoptev/go-stealth/issues/84)) ([72e06c3](https://github.com/anatolykoptev/go-stealth/commit/72e06c36240890367686fa16d994359c7695132f))
+
+## [1.28.1](https://github.com/anatolykoptev/go-stealth/compare/v1.28.0...v1.28.1) (2026-11-08)
+
+
+### Fixed
+
+* follow provider pagination only on the same origin ([#85](https://github.com/anatolykoptev/go-stealth/issues/85)) ([9ff01ac](https://github.com/anatolykoptev/go-stealth/commit/9ff01ac892ae2601e27b6d0f7cb196f799c95978))
+
+## [1.28.0](https://github.com/anatolykoptev/go-stealth/compare/v1.27.0...v1.28.0) (2026-11-04)
+
+
+### Added
+
+* WithCookieJar shares one cookie jar across clients ([#80](https://github.com/anatolykoptev/go-stealth/issues/80)) ([07f3650](https://github.com/anatolykoptev/go-stealth/commit/07f36505690a39bd24538a2f32b41b51b3165e7b))
+
+## [1.27.0](https://github.com/anatolykoptev/go-stealth/compare/v1.26.1...v1.27.0) (2026-11-04)
+
+
+### Added
+
+* match Chrome's TLS extension shuffle, fetch priority, zstd and add chrome_156 ([#74](https://github.com/anatolykoptev/go-stealth/issues/74)) ([c0549b9](https://github.com/anatolykoptev/go-stealth/commit/c0549b97c8d71327f48c45db18958299013efbcc))
+
+## [1.26.1](https://github.com/anatolykoptev/go-stealth/compare/v1.26.0...v1.26.1) (2026-11-04)
+
+
+### Fixed
+
+* headers that match the client's own browser profile ([#72](https://github.com/anatolykoptev/go-stealth/issues/72)) ([b256cab](https://github.com/anatolykoptev/go-stealth/commit/b256caba2b2261268573468c1f232127e8f0fa91))
+
+## [1.26.0](https://github.com/anatolykoptev/go-stealth/compare/v1.25.1...v1.26.0) (2026-11-04)
+
+
+### Added
+
+* coherent current browser profiles; fail on unknown profile names ([#70](https://github.com/anatolykoptev/go-stealth/issues/70)) ([4d10644](https://github.com/anatolykoptev/go-stealth/commit/4d106449165dec86d843b8aaf1eb764d2553ae67))
+
+## [1.25.1](https://github.com/anatolykoptev/go-stealth/compare/v1.25.0...v1.25.1) (2026-11-03)
+
+
+### Fixed
+
+* **ssrf:** let a client dial its configured proxy on a private address ([#66](https://github.com/anatolykoptev/go-stealth/issues/66)) ([d65390c](https://github.com/anatolykoptev/go-stealth/commit/d65390c2b51bcbf670ced8e241088b8c1157e306))
+
+## [1.25.0](https://github.com/anatolykoptev/go-stealth/compare/v1.24.0...v1.25.0) (2026-11-02)
+
+
+### Added
+
+* **client:** add CloseIdleConnections ([#64](https://github.com/anatolykoptev/go-stealth/issues/64)) ([c7eec72](https://github.com/anatolykoptev/go-stealth/commit/c7eec72c1c2cdff59e5c1c860e467332f563d30d))
+
+## [1.24.0](https://github.com/anatolykoptev/go-stealth/compare/v1.23.0...v1.24.0) (2026-11-02)
+
+
+### Added
+
+* **deps:** move to Go 1.27 and close the backend ([#61](https://github.com/anatolykoptev/go-stealth/issues/61)) ([307927f](https://github.com/anatolykoptev/go-stealth/commit/307927f94f5b89a2c107feaf0b44eee63c70f0fa))
+
+## [1.23.0](https://github.com/anatolykoptev/go-stealth/compare/v1.22.4...v1.23.0) (2026-10-10)
+
+
+### Added
+
+* **oxbrowser:** send X-Internal-Secret to ox-browser via go-kit svcauth (ox-browser[#173](https://github.com/anatolykoptev/go-stealth/issues/173)) ([#59](https://github.com/anatolykoptev/go-stealth/issues/59)) ([876152f](https://github.com/anatolykoptev/go-stealth/commit/876152f11ec9d51ac0f2665039dd53c5635d2d6d))
+
+## [1.22.4](https://github.com/anatolykoptev/go-stealth/compare/v1.22.3...v1.22.4) (2026-10-08)
+
+
+### Fixed
+
+* **proxypool:** refresh Webshare credentials periodically and on 407 ([#55](https://github.com/anatolykoptev/go-stealth/issues/55)) ([#56](https://github.com/anatolykoptev/go-stealth/issues/56)) ([b46e7be](https://github.com/anatolykoptev/go-stealth/commit/b46e7beb099fd8f8b71071e141b838e5384632a8))
+
+## [1.22.3](https://github.com/anatolykoptev/go-stealth/compare/v1.22.2...v1.22.3) (2026-08-04)
+
+
+### Documentation
+
+* **readme:** correct the profile count and drop links to private repos ([1032c7b](https://github.com/anatolykoptev/go-stealth/commit/1032c7bd488b11ef20b68f5bd566c2784556572a))
+
+## [1.22.2](https://github.com/anatolykoptev/go-stealth/compare/v1.22.1...v1.22.2) (2026-07-27)
+
+
+### Changed
+
+* **pacing:** delegate jitter/pacer to go-kit/pacing ([#51](https://github.com/anatolykoptev/go-stealth/issues/51)) ([3bb7486](https://github.com/anatolykoptev/go-stealth/commit/3bb7486bf1be87aec9045ed9c1e0209da4b574fa))
+
+## [1.22.1](https://github.com/anatolykoptev/go-stealth/compare/v1.22.0...v1.22.1) (2026-07-26)
+
+
+### Fixed
+
+* detect Cloudflare 403 managed challenges via cf-mitigated header ([#49](https://github.com/anatolykoptev/go-stealth/issues/49)) ([9471dd4](https://github.com/anatolykoptev/go-stealth/commit/9471dd4538b6e7a8c4bf510d76952d7a5dc36dd3))
+
 ## [1.22.0](https://github.com/anatolykoptev/go-stealth/compare/v1.21.2...v1.22.0) (2026-07-26)
 
 

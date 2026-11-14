@@ -29,7 +29,7 @@ func CleanHTML(s string) string {
 // Identity().UserAgent is the exact UA paired with the installed TLS profile
 // — the matched pair go-stealth guarantees by construction. When d is nil or
 // a test mock (no *stealth.BrowserClient concrete type), the UA is resolved
-// from the default TLS profile (ProfileChrome131 — the profile every
+// from the default TLS profile (ProfileChrome156 — the profile every
 // stealth.NewClient() in this repo installs, since no callsite uses
 // WithProfile) via UserAgentForProfile, so the UA matches the fleet's
 // canonical identity regardless.
@@ -42,14 +42,14 @@ func resolveUserAgent(d any) string {
 	if bc, ok := d.(*stealth.BrowserClient); ok && bc != nil {
 		return bc.Identity().UserAgent
 	}
-	return stealth.UserAgentForProfile(stealth.ProfileChrome131)
+	return stealth.UserAgentForProfile(stealth.ProfileChrome156)
 }
 
 // ChromeHeadersFor returns browser-like HTTP headers for direct fetching,
 // with the User-Agent derived from d's identity so it agrees with the JA3
 // fingerprint the presenting stealth client actually sends. d is the
 // BrowserDoer the caller will issue the request through; pass nil to resolve
-// from the default profile (ProfileChrome131).
+// from the default profile (ProfileChrome156).
 func ChromeHeadersFor(d any) map[string]string {
 	return map[string]string{
 		"accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",

@@ -6,7 +6,7 @@ import stealth "github.com/anatolykoptev/go-stealth"
 // the User-Agent derived from d's identity so it agrees with the JA3
 // fingerprint the presenting stealth client sends. d is the BrowserDoer the
 // caller will issue the request through; pass nil to resolve from the default
-// profile (ProfileChrome131).
+// profile (ProfileChrome156).
 //
 // Go's http.Client handles decompression automatically when accept-encoding
 // is not explicitly set; setting it manually disables auto-decompression
@@ -16,7 +16,7 @@ func searchHeadersFor(d any) map[string]string {
 	if bc, ok := d.(*stealth.BrowserClient); ok && bc != nil {
 		h["user-agent"] = bc.Identity().UserAgent
 	} else {
-		h["user-agent"] = stealth.UserAgentForProfile(stealth.ProfileChrome131)
+		h["user-agent"] = stealth.UserAgentForProfile(stealth.ProfileChrome156)
 	}
 	delete(h, "accept-encoding")
 	return h

@@ -1,31 +1,65 @@
 package stealth
 
 import (
+	"errors"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 
 	fhttp "github.com/bogdanfinn/fhttp"
+	"github.com/bogdanfinn/fhttp/http2"
 	tls_client "github.com/bogdanfinn/tls-client"
 	"github.com/bogdanfinn/tls-client/profiles"
 )
 
+// tlsHTTPClientFactory has the signature of tls_client.NewHttpClient.
+type tlsHTTPClientFactory func(logger tls_client.Logger, options ...tls_client.HttpClientOption) (tls_client.HttpClient, error)
+
 // tlsClientDoer wraps bogdanfinn/tls-client as an HTTPDoer.
 type tlsClientDoer struct {
 	client tls_client.HttpClient
+
+	// proxyMu guards proxy and serialises SetProxy. proxy is the last value
+	// applied to client ("" = direct), so an unchanged SetProxy can be skipped.
+	proxyMu sync.Mutex
+	proxy   string
+
+	// maxBody bounds the decoded response body (0 = unbounded); see
+	// BackendConfig.MaxBodyBytes.
+	maxBody int64
 }
 
 // newTLSClientBackend creates an HTTPDoer backed by bogdanfinn/tls-client.
 func newTLSClientBackend(cfg BackendConfig) (HTTPDoer, error) {
-	profile := mapTLSProfile(cfg.Profile)
+	profile, err := mapTLSProfile(cfg.Profile)
+	if err != nil {
+		return nil, err
+	}
+	if cfg.FetchMode {
+		profile = withFetchPriority(profile)
+	}
+	// Chrome shuffles its TLS extension order on every connection (since 106),
+	// so a real Chrome never repeats one JA3 across connections. tls-client's
+	// Chrome profiles ship a fixed order (the profile's RandomExtensionOrder
+	// flag is not honoured), and its client-level shuffle option is biased
+	// (see extension_order.go), so the profile carries our own shuffle.
+	if randomizesExtensionOrder(cfg.Profile) {
+		profile = withUniformExtensionOrder(profile)
+	}
 
 	opts := []tls_client.HttpClientOption{
 		tls_client.WithTimeoutSeconds(cfg.TimeoutSeconds),
 		tls_client.WithClientProfile(profile),
-		tls_client.WithCookieJar(tls_client.NewCookieJar()),
+	}
+	if cfg.CookieJar != nil {
+		// Caller-owned jar (shared across clients, RFC 6265 ordering and
+		// scoping decided by the jar). Otherwise tls-client's own jar.
+		opts = append(opts, tls_client.WithCookieJar(adaptCookieJar(cfg.CookieJar)))
+	} else {
+		opts = append(opts, tls_client.WithCookieJar(tls_client.NewCookieJar()))
 	}
 	if cfg.InsecureSkipVerify {
 		opts = append(opts, tls_client.WithInsecureSkipVerify())
@@ -65,11 +99,15 @@ func newTLSClientBackend(cfg BackendConfig) (HTTPDoer, error) {
 		opts = append(opts, tls_client.WithDisableHttp3())
 	}
 
-	client, err := tls_client.NewHttpClient(nil, opts...)
+	newClient := cfg.newHTTPClient
+	if newClient == nil {
+		newClient = tls_client.NewHttpClient
+	}
+	client, err := newClient(nil, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("tls-client init: %w", err)
 	}
-	return &tlsClientDoer{client: client}, nil
+	return &tlsClientDoer{client: client, proxy: cfg.ProxyURL, maxBody: cfg.MaxBodyBytes}, nil
 }
 
 // adaptRedirect bridges the stdlib-typed RedirectGuard into the fhttp-typed
@@ -130,8 +168,10 @@ func (t *tlsClientDoer) Do(req *Request) (*Response, error) {
 	}
 	defer resp.Body.Close()
 
-	rawData, readErr := io.ReadAll(resp.Body)
-	if readErr != nil && len(rawData) == 0 {
+	// Closing an unread body (deferred above) drops the connection instead of
+	// draining it, so an oversized body stops costing bytes at the limit.
+	rawData, readErr := readAllLimit(resp.Body, wireLimit(t.maxBody, resp.Header.Get("Content-Encoding")))
+	if errors.Is(readErr, ErrBodyTooLarge) || (readErr != nil && len(rawData) == 0) {
 		return &Response{StatusCode: resp.StatusCode}, fmt.Errorf("read body: %w", readErr)
 	}
 	// Partial read (e.g. brotli decode error mid-stream) — use what we got.
@@ -145,7 +185,7 @@ func (t *tlsClientDoer) Do(req *Request) (*Response, error) {
 		}
 	}
 
-	data, err := decompressBody(rawData, respHeaders["content-encoding"])
+	data, err := decodeBody(rawData, respHeaders["content-encoding"], t.maxBody)
 	if err != nil {
 		return &Response{StatusCode: resp.StatusCode}, fmt.Errorf("decompress body: %w", err)
 	}
@@ -153,8 +193,46 @@ func (t *tlsClientDoer) Do(req *Request) (*Response, error) {
 	return &Response{Body: data, Headers: respHeaders, StatusCode: resp.StatusCode}, nil
 }
 
+// Close releases the tls-client's idle connections and transports, including
+// the UDP sockets of HTTP/3 transports that CloseIdleConnections keeps open.
+// A connection currently serving a request is left to finish, and an HTTP/2
+// connection used by an in-flight request can stay open until its idle
+// timeout (about 90 s). The client remains usable: a Do after Close opens new
+// connections that nothing closes, and Close must not run concurrently with
+// Do. It always returns nil (tls-client's Close has no error result).
+func (t *tlsClientDoer) Close() error {
+	t.client.Close()
+	return nil
+}
+
+// CloseIdleConnections closes the tls-client's idle connections only; unlike
+// Close it leaves requests in flight alone and is safe beside Do.
+func (t *tlsClientDoer) CloseIdleConnections() {
+	t.client.CloseIdleConnections()
+}
+
+// SetProxy switches the proxy. It is a no-op when proxyURL equals the value
+// already applied, so a client whose proxy does not change keeps its
+// connections (tls-client rebuilds the whole transport on every SetProxy, even
+// for an unchanged value). On a change the old transport's idle connections
+// are released first, because tls-client drops the previous transport
+// unclosed. Requests in flight are left alone (Close would drop the cached
+// transport under them and fail concurrent HTTP/1 dials with
+// errProtocolChanged), and the old transport's HTTP/3 sockets are not
+// released. A failed SetProxy keeps tls-client on its previous proxy; the old
+// idle connections are already closed and the next request redials.
 func (t *tlsClientDoer) SetProxy(proxyURL string) error {
-	return t.client.SetProxy(proxyURL)
+	t.proxyMu.Lock()
+	defer t.proxyMu.Unlock()
+	if proxyURL == t.proxy {
+		return nil
+	}
+	t.client.CloseIdleConnections()
+	if err := t.client.SetProxy(proxyURL); err != nil {
+		return err
+	}
+	t.proxy = proxyURL
+	return nil
 }
 
 func (t *tlsClientDoer) GetCookieValue(rawURL, name string) string {
@@ -172,23 +250,137 @@ func (t *tlsClientDoer) GetCookieValue(rawURL, name string) string {
 
 // profileMap maps go-stealth TLSProfile values to bogdanfinn profiles.
 var profileMap = map[TLSProfile]profiles.ClientProfile{
-	ProfileChrome131:   profiles.Chrome_131,
-	ProfileChrome133:   profiles.Chrome_133,
-	ProfileChrome144:   profiles.Chrome_144,
-	ProfileChrome146:   profiles.Chrome_146,
+	ProfileChrome131: profiles.Chrome_131,
+	ProfileChrome133: profiles.Chrome_133,
+	ProfileChrome144: profiles.Chrome_144,
+	ProfileChrome146: profiles.Chrome_146,
+	ProfileChrome150: profiles.Chrome_150,
+	ProfileChrome152: profiles.Chrome_152,
+	// chrome_156 has no profile of its own in tls-client v1.18.0; Chrome_152 is
+	// the newest it ships. Measured: its JA4, ja4_r, peetprint and HTTP/2
+	// fingerprint equal those of installed Google Chrome 156.0.8078.80.
+	ProfileChrome156:   profiles.Chrome_152,
 	ProfileFirefox133:  profiles.Firefox_133,
 	ProfileFirefox148:  profiles.Firefox_148,
 	ProfileBrave146:    profiles.Brave_146,
 	ProfileSafari16:    profiles.Safari_16_0,
 	ProfileSafariIOS18: profiles.Safari_IOS_18_0,
 	ProfileSafariIOS17: profiles.Safari_IOS_17_0,
+	ProfileSafariIOS26: profiles.Safari_IOS_26_0,
 }
 
-// mapTLSProfile converts a TLSProfile to a bogdanfinn ClientProfile.
-// Falls back to Chrome_131 for unmapped values.
-func mapTLSProfile(p TLSProfile) profiles.ClientProfile {
+// fetchPriorityWire is the HTTP/2 weight byte Chrome puts on the HEADERS frame
+// of fetch() and XMLHttpRequest requests. The effective weight is wire+1, so
+// 219 is the 220 that echo services print; navigations use 255 (256). It is
+// exclusive on stream 0, like navigations.
+const fetchPriorityWire = 219
+
+// withFetchPriority returns p with the fetch/XHR HEADERS priority and every
+// other setting (ClientHello, SETTINGS, WINDOW_UPDATE, pseudo-header order,
+// HTTP/3 parameters) carried over untouched. tls-client holds the header
+// priority on the profile and exposes no per-request override, which is why
+// fetch mode is a client-level choice.
+func withFetchPriority(p profiles.ClientProfile) profiles.ClientProfile {
+	return cloneProfile(p, p.GetClientHelloId(),
+		&http2.PriorityParam{StreamDep: 0, Exclusive: true, Weight: fetchPriorityWire})
+}
+
+// isChromiumTLSProfile reports whether p is a Chrome-family TLS profile.
+func isChromiumTLSProfile(p TLSProfile) bool {
+	return strings.HasPrefix(string(p), "chrome_") || strings.HasPrefix(string(p), "brave_")
+}
+
+// extensionOrderRandomised lists the profiles whose browser shuffles its TLS
+// extension order per connection. The legacy Chrome profiles (131, 133, 144)
+// are deliberately absent: chrome_131 is presented on purpose by existing
+// consumers and its wire is frozen (see TestWire_Chrome131Frozen); 133 and 144
+// are left as shipped.
+var extensionOrderRandomised = map[TLSProfile]bool{
+	ProfileChrome146: true,
+	ProfileChrome150: true,
+	ProfileChrome152: true,
+	ProfileChrome156: true,
+	ProfileBrave146:  true,
+}
+
+func randomizesExtensionOrder(p TLSProfile) bool { return extensionOrderRandomised[p] }
+
+// ErrFetchModeUnsupported is returned by NewClient when WithFetchMode is used
+// with a profile outside the Chrome family.
+var ErrFetchModeUnsupported = errors.New("stealth: fetch mode needs a Chrome-family profile")
+
+// ErrUnknownTLSProfile is returned when a TLSProfile has no backend mapping.
+// An unmapped profile must never quietly become a different browser, so
+// client construction fails instead of substituting one.
+var ErrUnknownTLSProfile = errors.New("stealth: unknown TLS profile")
+
+// mapTLSProfile converts a TLSProfile to a bogdanfinn ClientProfile. It
+// returns ErrUnknownTLSProfile for a value with no mapping (including "").
+func mapTLSProfile(p TLSProfile) (profiles.ClientProfile, error) {
 	if mapped, ok := profileMap[p]; ok {
-		return mapped
+		return mapped, nil
 	}
-	return profiles.Chrome_131
+	return profiles.ClientProfile{}, fmt.Errorf("%w: %q", ErrUnknownTLSProfile, string(p))
+}
+
+// cookieJarAdapter exposes a stdlib http.CookieJar as the fhttp.CookieJar that
+// tls-client's WithCookieJar expects, so bogdanfinn/fhttp stays out of
+// go-stealth's public API (WithCookieJar takes net/http types). Every
+// decision about scoping (Domain, Path, Secure), expiry/deletion and ordering
+// is the wrapped jar's; the adapter only copies cookie fields, in order.
+type cookieJarAdapter struct {
+	jar http.CookieJar
+}
+
+// adaptCookieJar wraps jar for tls-client.
+func adaptCookieJar(jar http.CookieJar) fhttp.CookieJar {
+	return &cookieJarAdapter{jar: jar}
+}
+
+func (a *cookieJarAdapter) SetCookies(u *url.URL, cookies []*fhttp.Cookie) {
+	std := make([]*http.Cookie, 0, len(cookies))
+	for _, c := range cookies {
+		if c == nil {
+			continue
+		}
+		std = append(std, &http.Cookie{
+			Name:       c.Name,
+			Value:      c.Value,
+			Quoted:     c.Quoted,
+			Path:       c.Path,
+			Domain:     c.Domain,
+			Expires:    c.Expires,
+			RawExpires: c.RawExpires,
+			MaxAge:     c.MaxAge,
+			Secure:     c.Secure,
+			HttpOnly:   c.HttpOnly,
+			SameSite:   http.SameSite(c.SameSite),
+			Raw:        c.Raw,
+			Unparsed:   c.Unparsed,
+		})
+	}
+	a.jar.SetCookies(u, std)
+}
+
+func (a *cookieJarAdapter) Cookies(u *url.URL) []*fhttp.Cookie {
+	std := a.jar.Cookies(u)
+	out := make([]*fhttp.Cookie, 0, len(std))
+	for _, c := range std {
+		out = append(out, &fhttp.Cookie{
+			Name:       c.Name,
+			Value:      c.Value,
+			Quoted:     c.Quoted,
+			Path:       c.Path,
+			Domain:     c.Domain,
+			Expires:    c.Expires,
+			RawExpires: c.RawExpires,
+			MaxAge:     c.MaxAge,
+			Secure:     c.Secure,
+			HttpOnly:   c.HttpOnly,
+			SameSite:   fhttp.SameSite(c.SameSite),
+			Raw:        c.Raw,
+			Unparsed:   c.Unparsed,
+		})
+	}
+	return out
 }

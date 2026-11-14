@@ -1,4 +1,4 @@
-.PHONY: build test lint preflight clean fingerprint
+.PHONY: build test lint preflight clean fingerprint fingerprint-wire
 
 build:
 	GOWORK=off go build ./...
@@ -14,6 +14,10 @@ preflight:
 	GOWORK=off go vet ./...
 	GOWORK=off go build ./...
 	GOWORK=off go test -race -count=1 ./...
+	@out=$$(GOWORK=off go test -count=1 -v -run '^(TestLive_SetProxyRotation_DoesNotFailInFlightRequests|TestLive_CloseIdleConnections_ConcurrentWithDo|TestLive_SSRFProxy_ConcurrentRotationNeverRefusesProxy)$$' . 2>&1) || { echo "$$out"; exit 1; }; \
+	for t in TestLive_SetProxyRotation_DoesNotFailInFlightRequests TestLive_CloseIdleConnections_ConcurrentWithDo TestLive_SSRFProxy_ConcurrentRotationNeverRefusesProxy; do \
+		echo "$$out" | grep -q -- "--- PASS: $$t " || { echo "$$out"; echo "non-race test $$t did not run"; exit 1; }; \
+	done; echo "non-race tests ran: ok"
 
 clean:
 	go clean -cache -testcache
@@ -28,3 +32,10 @@ clean:
 # comparison to make it green.
 fingerprint:
 	GOWORK=off go test -tags fingerprint -count=1 -run 'TestFingerprintOracle|TestReferenceProvenance' ./...
+
+# fingerprint-wire measures every Chrome profile through tls.peet.ws and diffs it
+# field by field against real-browser captures in testdata/wire
+# (//go:build wirelive). Network required; an unreachable endpoint FAILS. Not
+# part of preflight.
+fingerprint-wire:
+	GOWORK=off go test -tags wirelive -count=1 -v -run TestWireLive .
