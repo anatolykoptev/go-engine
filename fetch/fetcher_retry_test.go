@@ -22,6 +22,7 @@ func TestFetcher_WithRetryTracker_SkipsPermanent(t *testing.T) {
 
 	tracker := stealth.NewRetryTracker(3, time.Minute)
 	f := New(
+		withFixtureNetwork(t, srv),
 		WithTimeout(5*time.Second),
 		WithRetryConfig(RetryConfig{
 			MaxRetries:  0,
@@ -33,13 +34,13 @@ func TestFetcher_WithRetryTracker_SkipsPermanent(t *testing.T) {
 	)
 
 	// First call: should fail and record attempt.
-	_, err := f.FetchBody(context.Background(), srv.URL)
+	_, err := f.FetchBody(context.Background(), fixtureURL(srv))
 	if err == nil {
 		t.Fatal("expected error for 404")
 	}
 
 	// Second call: tracker should skip (404 is permanent).
-	_, err = f.FetchBody(context.Background(), srv.URL)
+	_, err = f.FetchBody(context.Background(), fixtureURL(srv))
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -63,6 +64,7 @@ func TestFetcher_RetryHook_ReceivesAttempts(t *testing.T) {
 	defer srv.Close()
 
 	f := New(
+		withFixtureNetwork(t, srv),
 		WithTimeout(5*time.Second),
 		WithRetryConfig(RetryConfig{
 			MaxRetries:  2,
@@ -73,7 +75,7 @@ func TestFetcher_RetryHook_ReceivesAttempts(t *testing.T) {
 	)
 
 	ctx := stealth.WithRetryHook(context.Background(), hook)
-	_, _ = f.FetchBody(ctx, srv.URL)
+	_, _ = f.FetchBody(ctx, fixtureURL(srv))
 
 	if got := hookCalls.Load(); got != 2 {
 		t.Errorf("hook called %d times, want 2", got)

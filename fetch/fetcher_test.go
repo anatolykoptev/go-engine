@@ -15,8 +15,8 @@ func TestFetcher_FetchBody_PlainHTTP(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	f := New(WithTimeout(5 * time.Second))
-	body, err := f.FetchBody(context.Background(), srv.URL)
+	f := New(withFixtureNetwork(t, srv), WithTimeout(5*time.Second))
+	body, err := f.FetchBody(context.Background(), fixtureURL(srv))
 	if err != nil {
 		t.Fatalf("FetchBody: %v", err)
 	}
@@ -34,8 +34,8 @@ func TestFetcher_FetchBody_Gzip(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	f := New(WithTimeout(5 * time.Second))
-	body, err := f.FetchBody(context.Background(), srv.URL)
+	f := New(withFixtureNetwork(t, srv), WithTimeout(5*time.Second))
+	body, err := f.FetchBody(context.Background(), fixtureURL(srv))
 	if err != nil {
 		t.Fatalf("FetchBody: %v", err)
 	}
@@ -51,6 +51,7 @@ func TestFetcher_FetchBody_ServerError(t *testing.T) {
 	defer srv.Close()
 
 	f := New(
+		withFixtureNetwork(t, srv),
 		WithTimeout(5*time.Second),
 		WithRetryConfig(RetryConfig{
 			MaxRetries:  1,
@@ -59,7 +60,7 @@ func TestFetcher_FetchBody_ServerError(t *testing.T) {
 			Multiplier:  1.5,
 		}),
 	)
-	_, err := f.FetchBody(context.Background(), srv.URL)
+	_, err := f.FetchBody(context.Background(), fixtureURL(srv))
 	if err == nil {
 		t.Error("expected error for 500 response")
 	}
@@ -72,11 +73,11 @@ func TestFetcher_FetchBody_ContextCancelled(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	f := New(WithTimeout(10 * time.Second))
+	f := New(withFixtureNetwork(t, srv), WithTimeout(10*time.Second))
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
-	_, err := f.FetchBody(ctx, srv.URL)
+	_, err := f.FetchBody(ctx, fixtureURL(srv))
 	if err == nil {
 		t.Error("expected error for cancelled context")
 	}
@@ -121,8 +122,8 @@ func TestFetcher_UserAgentHeader(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	f := New(WithTimeout(5 * time.Second))
-	_, err := f.FetchBody(context.Background(), srv.URL)
+	f := New(withFixtureNetwork(t, srv), WithTimeout(5*time.Second))
+	_, err := f.FetchBody(context.Background(), fixtureURL(srv))
 	if err != nil {
 		t.Fatalf("FetchBody: %v", err)
 	}
