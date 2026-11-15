@@ -236,10 +236,12 @@ jobs:
           go-version-file: go.mod
       - uses: golangci/golangci-lint-action@v7
         with:
-          # v2.9.0 is the first golangci-lint release built with go1.26
-          # (go-engine targets go 1.26 per go.mod). v2.1.6 was built with
-          # go1.24 and refused the config outright (issue #71).
-          version: v2.9.0
+          # golangci-lint refuses to lint a module whose go directive is newer
+          # than the Go it was built with. go.mod is on go 1.27.x (go-kit
+          # v0.97.20 and later require it), so the pin must be a release built with
+          # go1.27: v2.14.0 was the first (v2.9.0 was built with go1.26 and
+          # v2.1.6 with go1.24, issue #71).
+          version: v2.15.0
 
   test:
     needs: [docs-scope]

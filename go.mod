@@ -5,13 +5,13 @@ go 1.27.3
 require (
 	github.com/JohannesKaufmann/html-to-markdown/v2 v2.5.0
 	github.com/PuerkitoBio/goquery v1.11.0
-	github.com/anatolykoptev/go-kit v0.97.19
+	github.com/anatolykoptev/go-kit v0.97.22
 	github.com/anatolykoptev/go-stealth v1.30.0
 	github.com/markusmobius/go-trafilatura v1.12.2
-	github.com/prometheus/client_golang v1.23.2
+	github.com/prometheus/client_golang v1.25.0
 	golang.org/x/net v0.62.0
 	golang.org/x/text v0.43.0
-	golang.org/x/time v0.15.0
+	golang.org/x/time v0.16.0
 )
 
 require (
@@ -44,9 +44,10 @@ require (
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/molecule-man/go-brrr v1.3.1 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
-	github.com/prometheus/client_model v0.6.2 // indirect
-	github.com/prometheus/common v0.66.1 // indirect
-	github.com/prometheus/procfs v0.16.1 // indirect
+	github.com/pandatix/go-abnf v0.5.5 // indirect
+	github.com/prometheus/client_model v0.6.3 // indirect
+	github.com/prometheus/common v0.73.1 // indirect
+	github.com/prometheus/procfs v0.23.0 // indirect
 	github.com/quic-go/qpack v0.6.0 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/rs/zerolog v1.34.0 // indirect
@@ -55,9 +56,8 @@ require (
 	github.com/wasilibs/go-re2 v1.10.0 // indirect
 	github.com/wasilibs/wazero-helpers v0.0.0-20250123031827-cd30c44769bb // indirect
 	github.com/yosssi/gohtml v0.0.0-20201013000340-ee4748c638f4 // indirect
-	go.yaml.in/yaml/v2 v2.4.2 // indirect
 	golang.org/x/crypto v0.58.0 // indirect
 	golang.org/x/sync v0.24.0 // indirect
 	golang.org/x/sys v0.49.0 // indirect
-	google.golang.org/protobuf v1.36.11 // indirect
+	google.golang.org/protobuf v1.36.12 // indirect
 )

@@ -37,8 +37,16 @@ Use `GOWORK=off`. Versions come from release-please (Conventional Commits); neve
 
 ## Invariants that are easy to break
 
-- **The direct fetch tier keeps its SSRF guard.** `fetch` redirects to loopback must stay blocked
-  and the policy comes from go-kit, not from the HTTP client library's weaker floor (see
+- **Every `fetch` tier keeps its destination guard, in every mode.** Direct-first on or off, proxy
+  or no proxy, the plain HTTP client, the direct client and the proxy client are all built from the
+  one `guard` in `fetch/guard.go` (go-kit policy: connect-time dial control, per-hop redirect check,
+  pre-request URL check), and `FetchBody` checks the URL once before any tier or forwarder. A guard
+  refusal (`fetch.ErrSSRFBlocked`) is terminal: no fallback, escalation or retry. Never build an HTTP
+  client that dials a caller-supplied URL without the go-kit guard (`NewHTTPDoer` in `search` and
+  `imagesearch` included); the ox-browser, go-browser and Byparr forwarders dial only their
+  configured endpoint. Tests reach loopback fixtures through
+  `fetch.WithTestNetwork(addr)` (public-looking host name in the URL, connection routed to the
+  fixture), never by switching the guard off (`fetch/guard_test.go`,
   `fetch/fetcher_ssrf_direct_test.go`).
 - **Per-source timeouts must not poison the block cache.** A parent deadline must not mark a host
   blocked; a per-source timeout does. `search/direct_timeout_test.go` pins this.

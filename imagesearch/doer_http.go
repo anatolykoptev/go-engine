@@ -4,6 +4,8 @@ import (
 	"io"
 	"net/http"
 	"time"
+
+	kithttputil "github.com/anatolykoptev/go-kit/httputil"
 )
 
 const defaultHTTPTimeout = 15 * time.Second
@@ -15,9 +17,11 @@ type HTTPDoer struct {
 	Client *http.Client
 }
 
-// NewHTTPDoer creates a simple HTTP doer without proxy.
+// NewHTTPDoer creates a simple HTTP doer without proxy. The client carries the
+// go-kit destination guard (connect-time check, every redirect hop, pre-request
+// URL check), so a URL that targets an internal address is refused.
 func NewHTTPDoer() *HTTPDoer {
-	return &HTTPDoer{Client: &http.Client{Timeout: defaultHTTPTimeout}}
+	return &HTTPDoer{Client: kithttputil.NewSSRFGuardedClient(&http.Client{Timeout: defaultHTTPTimeout})}
 }
 
 func (d *HTTPDoer) Do(method, url string, headers map[string]string, body io.Reader) ([]byte, map[string]string, int, error) {

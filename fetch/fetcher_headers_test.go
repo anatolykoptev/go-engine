@@ -51,10 +51,11 @@ func TestFetchBodyWithHeaders_HTTPPath_AcceptJSON(t *testing.T) {
 	defer srv.Close()
 
 	f := New(
+		withFixtureNetwork(t, srv),
 		WithTimeout(5*time.Second),
 		WithRetryConfig(RetryConfig{MaxRetries: 0, InitialWait: time.Millisecond, MaxWait: time.Millisecond, Multiplier: 1}),
 	)
-	body, err := f.FetchBodyWithHeaders(context.Background(), srv.URL, map[string]string{"Accept": "application/json"})
+	body, err := f.FetchBodyWithHeaders(context.Background(), fixtureURL(srv), map[string]string{"Accept": "application/json"})
 	if err != nil {
 		t.Fatalf("FetchBodyWithHeaders: %v", err)
 	}
@@ -79,10 +80,10 @@ func TestFetchBodyWithHeaders_HTTPPath_NilExtra(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	f := New(WithTimeout(5 * time.Second))
+	f := New(withFixtureNetwork(t, srv), WithTimeout(5*time.Second))
 
-	bodyA, errA := f.FetchBody(context.Background(), srv.URL)
-	bodyB, errB := f.FetchBodyWithHeaders(context.Background(), srv.URL, nil)
+	bodyA, errA := f.FetchBody(context.Background(), fixtureURL(srv))
+	bodyB, errB := f.FetchBodyWithHeaders(context.Background(), fixtureURL(srv), nil)
 
 	if errA != nil || errB != nil {
 		t.Fatalf("FetchBody=%v FetchBodyWithHeaders(nil)=%v", errA, errB)
@@ -159,10 +160,10 @@ func TestFetchBody_DelegatesTo_FetchBodyWithHeaders_NilExtra(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	f := New(WithTimeout(5 * time.Second))
+	f := New(withFixtureNetwork(t, srv), WithTimeout(5*time.Second))
 
-	a, errA := f.FetchBody(context.Background(), srv.URL)
-	b, errB := f.FetchBodyWithHeaders(context.Background(), srv.URL, nil)
+	a, errA := f.FetchBody(context.Background(), fixtureURL(srv))
+	b, errB := f.FetchBodyWithHeaders(context.Background(), fixtureURL(srv), nil)
 
 	if errA != nil || errB != nil {
 		t.Fatalf("errA=%v errB=%v", errA, errB)
@@ -222,6 +223,7 @@ func TestFetchBodyWithHeaders_NilExtra_ProxyTierPreservesLegacyAccept(t *testing
 	proxy := &headerCapture{status: http.StatusOK, body: largeHTML("proxy nil-extra regression")}
 
 	f := New(
+		withFixtureResolver(),
 		WithTimeout(5*time.Second),
 		WithRetryConfig(RetryConfig{MaxRetries: 0, InitialWait: time.Millisecond, MaxWait: time.Millisecond, Multiplier: 1}),
 	)
