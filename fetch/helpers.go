@@ -7,6 +7,8 @@ import (
 	"net/http"
 
 	stealth "github.com/anatolykoptev/go-stealth"
+
+	"github.com/anatolykoptev/go-engine/internal/chromehdr"
 )
 
 // ReadResponseBody reads the response body, handling gzip decompression.
@@ -22,14 +24,16 @@ func ReadResponseBody(resp *http.Response) ([]byte, error) {
 	return io.ReadAll(resp.Body)
 }
 
-// ChromeHeaders returns common Chrome browser headers.
+// ChromeHeaders returns the Chrome navigation headers for go-stealth's default
+// identity: its User-Agent, Client Hints and the full navigation set.
 func ChromeHeaders() map[string]string {
-	return stealth.ChromeHeaders()
+	return chromehdr.For(nil)
 }
 
-// RandomUserAgent returns a random Chrome-like User-Agent string.
+// RandomUserAgent returns the User-Agent of a random desktop OS variant of the
+// default Chrome profile, so it always matches the default TLS fingerprint.
 func RandomUserAgent() string {
-	return stealth.RandomUserAgent()
+	return stealth.RandomChromeUserAgent()
 }
 
 // RetryDo retries fn up to MaxRetries times with exponential backoff.
