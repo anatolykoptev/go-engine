@@ -108,8 +108,11 @@ func (d *DDG) searchHTML(ctx context.Context, query, region, timeRange string) (
 	df := timeRangeToDDG(timeRange)
 	formBody := fmt.Sprintf("q=%s&kl=%s&df=%s", url.QueryEscape(query), url.QueryEscape(region), url.QueryEscape(df))
 
-	headers := ChromeHeadersFor(d.browser)
+	// A form POST from the engine's own page: same-origin, with the Origin
+	// Chrome adds to every POST.
+	headers := ChromeHeadersForSite(d.browser, siteSameOrigin)
 	headers["referer"] = "https://html.duckduckgo.com/"
+	headers["origin"] = "https://html.duckduckgo.com"
 	headers["content-type"] = "application/x-www-form-urlencoded"
 
 	data, _, status, err := d.browser.Do(http.MethodPost, ddgHTMLEndpoint, headers, strings.NewReader(formBody))
@@ -136,7 +139,7 @@ func (d *DDG) getVQD(ctx context.Context, query string) (string, error) {
 
 	u := ddgHomepage + "?q=" + url.QueryEscape(query)
 
-	headers := ChromeHeadersFor(d.browser)
+	headers := ChromeHeadersForSite(d.browser, siteSameOrigin)
 	headers["referer"] = ddgHomepage
 
 	data, _, status, err := d.browser.Do(http.MethodGet, u, headers, nil)
@@ -168,8 +171,11 @@ func (d *DDG) searchDJS(ctx context.Context, query, vqd, region, timeRange strin
 	}
 	u := ddgDJSEndpoint + "?" + params.Encode()
 
-	headers := ChromeHeadersFor(d.browser)
+	// The page's own XHR from duckduckgo.com to links.duckduckgo.com: a CORS
+	// request, same-site, carrying the page's Origin.
+	headers := ChromeFetchHeadersFor(d.browser, siteSameSite)
 	headers["referer"] = ddgHomepage
+	headers["origin"] = strings.TrimSuffix(ddgHomepage, "/")
 	headers["accept"] = "application/json, text/javascript, */*; q=0.01"
 
 	data, _, status, err := d.browser.Do(http.MethodGet, u, headers, nil)

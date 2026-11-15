@@ -68,6 +68,14 @@ func (b *Bing) Search(ctx context.Context, query string, opts SearchOpts) ([]Res
 
 	headers := ChromeHeadersFor(b.browser)
 	headers["referer"] = bingReferer
+	// sec-fetch-site stays "none" although a Referer is set, which real Chrome
+	// never pairs: measured against the coherent "same-origin" on never-seen
+	// queries, 20 persistent sessions of 3 queries each, "none" had 3 sessions
+	// with a collapsed result (7 of 60 results), "same-origin" 8 sessions (19 of
+	// 60); a new session per request showed 3 of 20 for both. Bing is the one
+	// engine here measured with this pair; every other engine sends the
+	// coherent value.
+	//
 	// The plain HTML Accept stays. Measured on a datacenter egress, a
 	// persistent Bing session sent go-stealth's long navigation Accept was
 	// served the degraded SERP (results matching one template word of the

@@ -57,8 +57,11 @@ func (r *Reddit) Search(ctx context.Context, query string, opts SearchOpts) ([]R
 	u := redditEndpoint + "?q=" + url.QueryEscape(query) +
 		"&limit=10&sort=relevance&t=" + t
 
-	headers := ChromeHeadersFor(r.browser)
+	// The page's own fetch() of its search endpoint: a same-origin CORS
+	// request, which carries the page as Referer and no Origin.
+	headers := ChromeFetchHeadersFor(r.browser, siteSameOrigin)
 	headers["accept"] = acceptJSON
+	headers["referer"] = redditBaseURL + "/"
 
 	data, _, status, err := r.browser.Do(http.MethodGet, u, headers, nil)
 	if err != nil {

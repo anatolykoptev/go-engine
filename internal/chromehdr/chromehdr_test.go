@@ -138,3 +138,28 @@ func TestFor_UsesSourceBehindWrapper(t *testing.T) {
 		t.Fatalf("user-agent = %q, want the wrapped source's", got["user-agent"])
 	}
 }
+
+// TestForOptions_NonChromiumClientKeepsItsOwnUserAgent pins the fallback for a
+// client whose identity is not Chromium: go-stealth has no Chrome header set
+// for it, and the default Chrome identity would contradict its TLS handshake,
+// so it gets its own User-Agent and no Chrome Client Hints or Sec-Fetch set.
+//
+// Falsification: delete the `errors.Is(err, stealth.ErrNotChromium)` branch in
+// fallback (internal/chromehdr/chromehdr.go) and this test goes RED (the
+// client is described as the default Chrome, with sec-ch-ua).
+func TestForOptions_NonChromiumClientKeepsItsOwnUserAgent(t *testing.T) {
+	t.Parallel()
+	c, err := stealth.NewClient(stealth.WithProfile(stealth.ProfileFirefox148))
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	got := ForOptions(c, stealth.HeaderOptions{})
+	if got["user-agent"] != c.Identity().UserAgent || !strings.Contains(got["user-agent"], "Firefox") {
+		t.Errorf("user-agent = %q, want the Firefox client's own %q", got["user-agent"], c.Identity().UserAgent)
+	}
+	for k := range got {
+		if strings.HasPrefix(k, "sec-") || k == "upgrade-insecure-requests" {
+			t.Errorf("header %q sent for a non-Chromium client", k)
+		}
+	}
+}

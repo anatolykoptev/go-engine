@@ -15,7 +15,15 @@ import (
 // is not explicitly set; setting it manually disables auto-decompression
 // and causes regex parsers to fail on compressed responses.
 func searchHeadersFor(d any) map[string]string {
-	return chromehdr.ForOptions(d, stealth.HeaderOptions{OmitAcceptEncoding: true})
+	return searchHeadersForSite(d, "")
+}
+
+// searchHeadersForSite is searchHeadersFor for a navigation whose Referer is on
+// site relative to the target (stealth.FetchSiteSameOrigin for a link on the
+// engine's own page). Real Chrome never sends sec-fetch-site: none together
+// with a Referer; an empty site keeps the typed-navigation value.
+func searchHeadersForSite(d any, site stealth.FetchSite) map[string]string {
+	return chromehdr.ForOptions(d, stealth.HeaderOptions{Site: site, OmitAcceptEncoding: true})
 }
 
 // fetchHeadersFor returns the headers of a page-issued fetch() to the page's
