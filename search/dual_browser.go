@@ -10,6 +10,9 @@ import (
 	"time"
 
 	kithttputil "github.com/anatolykoptev/go-kit/httputil"
+	stealth "github.com/anatolykoptev/go-stealth"
+
+	"github.com/anatolykoptev/go-engine/internal/chromehdr"
 )
 
 // dualBrowser tries primary BrowserDoer first; on transport error or quota-exhausted
@@ -42,6 +45,17 @@ func newDualBrowserWithLogger(primary, fallback BrowserDoer, logger *slog.Logger
 		return primary
 	}
 	return &dualBrowser{primary: primary, fallback: fallback, logger: logger}
+}
+
+// RequestHeaders describes the browser the primary doer presents, so the
+// headers a scraper builds from this wrapper agree with the TLS handshake of
+// the first attempt instead of a default identity. The fallback is built from
+// the same default profile.
+func (d *dualBrowser) RequestHeaders(opts stealth.HeaderOptions) (stealth.RequestHeaders, error) {
+	if src, ok := d.primary.(chromehdr.Source); ok && !isNilInterface(d.primary) {
+		return src.RequestHeaders(opts)
+	}
+	return stealth.DefaultIdentity().RequestHeaders(opts)
 }
 
 func (d *dualBrowser) Do(method, url string, headers map[string]string, body io.Reader) ([]byte, map[string]string, int, error) {

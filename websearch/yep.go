@@ -58,9 +58,12 @@ func (y *Yep) Search(ctx context.Context, query string, opts SearchOpts) ([]Resu
 	}
 
 	u := yepEndpoint + "?" + args.Encode()
-	headers := ChromeHeadersFor(y.browser)
+	// The page's own XHR from yep.com to api.yep.com: a CORS request,
+	// same-site, carrying the page's Origin.
+	headers := ChromeFetchHeadersFor(y.browser, siteSameSite)
 	headers["accept"] = acceptJSON
 	headers["referer"] = "https://yep.com/"
+	headers["origin"] = "https://yep.com"
 
 	data, _, status, err := y.browser.Do(http.MethodGet, u, headers, nil)
 	if err != nil {

@@ -11,6 +11,8 @@ import (
 	"regexp"
 	"strings"
 
+	stealth "github.com/anatolykoptev/go-stealth"
+
 	"github.com/anatolykoptev/go-engine/metrics"
 	"github.com/anatolykoptev/go-engine/sources"
 	"github.com/anatolykoptev/go-engine/websearch"
@@ -50,8 +52,11 @@ func SearchWikipediaDirect(ctx context.Context, bc BrowserDoer, query, lang stri
 		lang, url.QueryEscape(query),
 	)
 
-	headers := websearch.ChromeHeadersFor(bc)
+	// The wiki page's own fetch() of its API: a same-origin CORS request,
+	// which carries the page as Referer and no Origin.
+	headers := websearch.ChromeFetchHeadersFor(bc, stealth.FetchSiteSameOrigin)
 	headers["accept"] = "application/json"
+	headers["referer"] = fmt.Sprintf("https://%s.wikipedia.org/", lang)
 
 	data, _, status, err := bc.Do(http.MethodGet, apiURL, headers, nil)
 	if err != nil {

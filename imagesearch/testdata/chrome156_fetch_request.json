@@ -1,0 +1,46 @@
+{
+  "provenance": {
+    "browser": "Google Chrome",
+    "version": "156.0.8078.80",
+    "build": "stable, branded",
+    "platform": "macOS arm64",
+    "captured_at": "2026-11-04T09:16:12Z",
+    "source": "go-stealth testdata/wire/google_chrome_156_fetch.json: a page fetch() to its own origin echoed back by a header-echo service; only the request headers are kept"
+  },
+  "request_header_names": [
+    "sec-ch-ua-platform",
+    "authorization",
+    "x-csrf-token",
+    "sec-ch-ua",
+    "x-custom-1",
+    "sec-ch-ua-mobile",
+    "x-custom-2",
+    "x-custom-3",
+    "x-custom-4",
+    "user-agent",
+    "content-type",
+    "accept",
+    "sec-fetch-site",
+    "sec-fetch-mode",
+    "sec-fetch-dest",
+    "referer",
+    "accept-encoding",
+    "accept-language",
+    "cookie",
+    "cookie",
+    "priority"
+  ],
+  "request_headers": {
+    "sec-ch-ua-platform": "\"macOS\"",
+    "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\"",
+    "sec-ch-ua-mobile": "?0",
+    "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
+    "accept": "*/*",
+    "sec-fetch-site": "same-origin",
+    "sec-fetch-mode": "cors",
+    "sec-fetch-dest": "empty",
+    "accept-encoding": "gzip, deflate, br, zstd",
+    "accept-language": "en-US,en;q=0.9",
+    "priority": "u=1, i"
+  }
+}

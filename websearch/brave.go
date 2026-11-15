@@ -71,7 +71,7 @@ func (b *Brave) Search(ctx context.Context, query string, opts SearchOpts) ([]Re
 
 	u := BraveSearchURL(query, opts)
 
-	headers := ChromeHeadersFor(b.browser)
+	headers := ChromeHeadersForSite(b.browser, siteSameOrigin)
 	headers["referer"] = braveReferer
 	headers["accept"] = acceptHTML
 

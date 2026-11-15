@@ -81,6 +81,18 @@ func traceWroteRequest(trace *httptrace.ClientTrace, err error) {
 	}
 }
 
+func traceDNSStart(trace *httptrace.ClientTrace, host string) {
+	if trace != nil && trace.DNSStart != nil {
+		trace.DNSStart(httptrace.DNSStartInfo{Host: host})
+	}
+}
+
+func traceDNSDone(trace *httptrace.ClientTrace, addrs []net.IPAddr, err error) {
+	if trace != nil && trace.DNSDone != nil {
+		trace.DNSDone(httptrace.DNSDoneInfo{Addrs: addrs, Err: err})
+	}
+}
+
 func traceConnectStart(trace *httptrace.ClientTrace, network, addr string) {
 	if trace != nil && trace.ConnectStart != nil {
 		trace.ConnectStart(network, addr)

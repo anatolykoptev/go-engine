@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+
+	stealth "github.com/anatolykoptev/go-stealth"
 )
 
 const (
@@ -32,7 +34,7 @@ func (d *DdgImages) Search(ctx context.Context, doer BrowserDoer, query string, 
 
 	// Step 1: fetch homepage to get vqd token.
 	tokenURL := ddgImagesHome + "?q=" + url.QueryEscape(query) + "&iax=images&ia=images"
-	headers := searchHeadersFor(doer)
+	headers := searchHeadersForSite(doer, stealth.FetchSiteSameOrigin)
 	headers["referer"] = ddgImagesHome
 	headers["cookie"] = ddgCookie
 
@@ -53,11 +55,9 @@ func (d *DdgImages) Search(ctx context.Context, doer BrowserDoer, query string, 
 	imagesURL := fmt.Sprintf("%s?l=wt-wt&o=json&q=%s&vqd=%s&f=,,,,,&p=1",
 		ddgImagesAPI, url.QueryEscape(query), url.QueryEscape(vqd))
 
-	imgHeaders := searchHeadersFor(doer)
+	imgHeaders := fetchHeadersFor(doer)
 	imgHeaders["referer"] = ddgImagesHome
 	imgHeaders["x-requested-with"] = "XMLHttpRequest"
-	imgHeaders["sec-fetch-site"] = "same-origin"
-	imgHeaders["sec-fetch-mode"] = "cors"
 	imgHeaders["cookie"] = ddgCookie
 
 	imgData, _, imgStatus, err := doer.Do(http.MethodGet, imagesURL, imgHeaders, nil)

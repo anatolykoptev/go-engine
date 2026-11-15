@@ -13,6 +13,8 @@ import (
 	"sync"
 	"time"
 
+	stealth "github.com/anatolykoptev/go-stealth"
+
 	"github.com/anatolykoptev/go-engine/metrics"
 	"github.com/anatolykoptev/go-engine/sources"
 	"github.com/anatolykoptev/go-engine/websearch"
@@ -110,8 +112,11 @@ func searchMarginaliaDirect(ctx context.Context, bc BrowserDoer, query, key stri
 		redactKey = ""
 	}
 
-	headers := websearch.ChromeHeadersFor(bc)
+	// A fetch() of the API from its own origin: a same-origin CORS request,
+	// which carries the page as Referer and no Origin.
+	headers := websearch.ChromeFetchHeadersFor(bc, stealth.FetchSiteSameOrigin)
 	headers["accept"] = "application/json"
+	headers["referer"] = "https://api.marginalia.nu/"
 
 	data, _, status, err := bc.Do(http.MethodGet, apiURL, headers, nil)
 	if err != nil {
