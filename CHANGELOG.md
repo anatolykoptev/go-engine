@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.56.4](https://github.com/anatolykoptev/go-engine/compare/v1.56.3...v1.56.4) (2026-11-15)
+
+
+### Changed
+
+* build Chrome request headers with go-stealth v1.30 ([#112](https://github.com/anatolykoptev/go-engine/issues/112)) ([f3b1b25](https://github.com/anatolykoptev/go-engine/commit/f3b1b259d05ad2733f925270891b8917cc553fd8))
+
 ## [1.56.3](https://github.com/anatolykoptev/go-engine/compare/v1.56.2...v1.56.3) (2026-11-15)
 
 
