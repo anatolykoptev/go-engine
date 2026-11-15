@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.56.2](https://github.com/anatolykoptev/go-engine/compare/v1.56.1...v1.56.2) (2026-11-15)
+
+
+### Fixed
+
+* **fetch:** apply the destination guard on every tier, including redirects ([#111](https://github.com/anatolykoptev/go-engine/issues/111)) ([9a53358](https://github.com/anatolykoptev/go-engine/commit/9a53358bb96011b70d83c410aa739ebf6119ac77))
+
 ## [1.56.1](https://github.com/anatolykoptev/go-engine/compare/v1.56.0...v1.56.1) (2026-11-11)
 
 
