@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	neturl "net/url"
 	"sync/atomic"
 	"syscall"
 	"testing"
@@ -21,18 +22,29 @@ func retryThrice() Option {
 	return WithRetryConfig(RetryConfig{MaxRetries: 3, InitialWait: time.Millisecond, MaxWait: time.Millisecond, Multiplier: 1})
 }
 
-// An empty (or exhausted) pool must not reach a dial that has no connect-time
-// hook. go-stealth reads "" from the pool as "no proxy" and tls-client then dials
+// dryPool reports one proxy but has none to give: the state of a pool that runs
+// dry between the Fetcher's Len() check and go-stealth's own Next().
+type dryPool struct{}
+
+func (dryPool) Next() string { return "" }
+func (dryPool) Len() int     { return 1 }
+func (dryPool) TransportProxy() func(*http.Request) (*neturl.URL, error) {
+	return func(*http.Request) (*neturl.URL, error) { return nil, nil }
+}
+
+// A pool that runs dry must not reach a dial that has no connect-time hook.
+// go-stealth reads "" from the pool as "no proxy" and tls-client then dials
 // through a bare dialer, so a name that is public when checked and loopback when
 // connected would be fetched. The pool is wrapped, and the request runs on the
 // guarded direct client instead.
 // Mutation: fetch/fetcher.go New(), pass f.proxyPool instead of f.pool to
 // stealth.WithProxyPool.
-func TestProxyTier_EmptyPool_RebindingHost_NeverDialsUnguarded(t *testing.T) {
+func TestProxyTier_PoolRunsDry_RebindingHost_NeverDialsUnguarded(t *testing.T) {
 	srv, hits := hitCounter(t)
 	_, port, _ := net.SplitHostPort(srv.Listener.Addr().String())
 
-	f := New(WithProxyPool(proxypool.NewStatic()), WithTimeout(5*time.Second), noRetry(), withFixtureResolver())
+	m := &atomicMetrics{}
+	f := New(WithProxyPool(dryPool{}), WithTimeout(5*time.Second), noRetry(), withFixtureResolver(), WithMetrics(m))
 	if !f.HasProxy() {
 		t.Fatal("setup: proxy client was not built")
 	}
@@ -41,13 +53,13 @@ func TestProxyTier_EmptyPool_RebindingHost_NeverDialsUnguarded(t *testing.T) {
 	// the fixture resolver answers public for the URL checks.
 	_, err := f.fetchViaProxy(context.Background(), "http://localhost:"+port+"/", nil)
 	if !errors.Is(err, ErrSSRFBlocked) {
-		t.Fatalf("empty pool, name resolving to loopback: error = %v, want errors.Is ErrSSRFBlocked", err)
+		t.Fatalf("dry pool, name resolving to loopback: error = %v, want errors.Is ErrSSRFBlocked", err)
 	}
 	if got := hits.Load(); got != 0 {
-		t.Fatalf("loopback server saw %d request(s) through an empty pool, want 0", got)
+		t.Fatalf("loopback server saw %d request(s) through a dry pool, want 0", got)
 	}
-	if f.pool.emptiedCount() == 0 {
-		t.Fatal("the pool was never asked while empty: the test did not exercise the empty-pool path")
+	if m.fallbackErr.Load() != 1 {
+		t.Errorf("dry-pool direct egress counted %d times, want 1 (tier direct_fallback)", m.fallbackErr.Load())
 	}
 }
 

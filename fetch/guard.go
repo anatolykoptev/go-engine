@@ -7,7 +7,6 @@ import (
 	"net"
 	"net/http"
 	neturl "net/url"
-	"sync/atomic"
 
 	kithttputil "github.com/anatolykoptev/go-kit/httputil"
 	stealth "github.com/anatolykoptev/go-stealth"
@@ -247,18 +246,44 @@ func isRefusal(err error) bool {
 	return isSSRFBlocked(err) || errors.Is(err, ErrResolveFailed)
 }
 
+// deadProxyAddr is the dial target of [emptyPoolProxy]: "this network", port 0.
+const deadProxyAddr = "0.0.0.0:0"
+
 // emptyPoolProxy is what [guardedPool] hands go-stealth in place of "", and the
-// proxy the proxy client starts with. Its dial target is "this network" port 0:
-// go-kit's connect-time check refuses it before any connection (and without that
-// check a connect to port 0 fails), so a request that gets it can never reach the
-// destination.
+// proxy the proxy client starts on. It is a safety net, not a route: [Fetcher]
+// goes straight to the guarded direct client when the pool reports it is empty,
+// and only a race (the pool running dry between that check and go-stealth's own
+// Next) lands a request on this proxy.
+//
+// What happens to a request that does: go-kit's connect-time check refuses
+// 0.0.0.0 on go-stealth versions that guard the proxy dial. Newer go-stealth
+// allowlists a configured proxy endpoint, so the connect to port 0 fails with
+// "connection refused" instead, and go-stealth retries it, which is slow; either
+// way no connection to the destination is made. The dial error names
+// [deadProxyAddr], which is how [isDeadProxyDial] attributes the failure to this
+// call.
 //
 // Why a dead proxy rather than an unsupported one: tls-client's SetProxy rolls a
 // failed switch back to the previous proxy, and with none set that is a bare
 // direct dialer without the connect-time hook. Starting from a hooked dead proxy
 // means no failure path, an empty pool or a malformed proxy URL alike, ends in an
 // unguarded direct dial.
-const emptyPoolProxy = "http://0.0.0.0:0"
+const emptyPoolProxy = "http://" + deadProxyAddr
+
+// poolDryError marks a request whose dial went to [emptyPoolProxy]. It has no
+// Unwrap, so the retry layer does not retry it (retrying would pay go-stealth's
+// backoff against a dead proxy for nothing).
+type poolDryError struct{ cause error }
+
+func (e *poolDryError) Error() string { return "fetch: proxy pool had no proxy: " + e.cause.Error() }
+
+// isDeadProxyDial reports whether err is a dial to the dead proxy, i.e. THIS
+// request was pointed at [emptyPoolProxy]. A healthy proxied request that fails
+// for its own reason (a 404, a 502 from the proxy, a timeout) never carries it.
+func isDeadProxyDial(err error) bool {
+	var op *net.OpError
+	return errors.As(err, &op) && op.Addr != nil && op.Addr.String() == deadProxyAddr
+}
 
 // guardedPool wraps the operator's proxy pool so it never returns "". go-stealth
 // treats "" as "no proxy" and then dials the destination directly through a
@@ -267,7 +292,6 @@ const emptyPoolProxy = "http://0.0.0.0:0"
 // Fetcher retries it on a guarded direct client (see fetchViaProxy).
 type guardedPool struct {
 	proxypool.ProxyPool
-	emptied atomic.Int64
 }
 
 func newGuardedPool(p proxypool.ProxyPool) *guardedPool { return &guardedPool{ProxyPool: p} }
@@ -277,14 +301,8 @@ func (p *guardedPool) Next() string {
 	if s := p.ProxyPool.Next(); s != "" {
 		return s
 	}
-	p.emptied.Add(1)
 	return emptyPoolProxy
 }
 
-// emptiedCount is the number of times the inner pool had no proxy to give.
-func (p *guardedPool) emptiedCount() int64 {
-	if p == nil {
-		return 0
-	}
-	return p.emptied.Load()
-}
+// empty reports whether the pool has no proxies at all.
+func (p *guardedPool) empty() bool { return p != nil && p.Len() == 0 }

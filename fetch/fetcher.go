@@ -16,6 +16,7 @@ import (
 	"net/http"
 	neturl "net/url"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	stealth "github.com/anatolykoptev/go-stealth"
@@ -66,6 +67,7 @@ type Fetcher struct {
 	retryTracker      *stealth.RetryTracker
 	proxyPool         proxypool.ProxyPool    // deferred: used to build browserClient in New()
 	pool              *guardedPool           // proxyPool wrapped so it never answers "" (see guardedPool)
+	lastPoolWarn      atomic.Int64           // unix nanos of the last dry-pool warning
 	poolFallback      stealthDoer            // guarded no-proxy client for requests the pool had no proxy for
 	cookieProvider    stealth.CookieProvider // deferred: passed to stealth.NewClient in New()
 	byparrURL         string                 // Byparr fallback URL (empty = disabled)
@@ -286,6 +288,9 @@ func (f *Fetcher) FetchBodyWithHeaders(ctx context.Context, url string, extra ma
 		err = terminalIfBlocked(err)
 		f.countRefusal(err) // refused by a tier's own guard: redirect hop, rebind, or proxy/direct URL check
 	}
+	if errors.Is(err, ErrResolveFailed) {
+		f.reportResolveRefused(ctx, url, err) // a tier's own check could not resolve the name
+	}
 
 	if f.retryTracker != nil {
 		if err != nil {
@@ -313,17 +318,25 @@ func (f *Fetcher) checkDestination(ctx context.Context, rawURL string) error {
 	case err == nil:
 		return nil
 	case isSSRFBlocked(err) && resolveCause(err) != nil:
-		host := hostOf(rawURL)
-		if ctx.Err() == nil { // the caller giving up is not the resolver failing
-			f.metrics.incResolveRefused()
-			slog.Warn("fetch: destination not fetched, name did not resolve",
-				slog.String("host", host), slog.Any("error", resolveCause(err)))
-		}
-		return asResolveError(err, host)
+		f.reportResolveRefused(ctx, rawURL, err)
+		return asResolveError(err, hostOf(rawURL))
 	default:
 		f.countRefusal(err)
 		return terminalIfBlocked(err)
 	}
+}
+
+// reportResolveRefused counts and logs a destination refused because its name
+// did not resolve, for the entry check and for a tier's own check alike. The
+// log carries the host, never the URL. The caller giving up (cancel, deadline)
+// is not the resolver failing and is neither counted nor logged.
+func (f *Fetcher) reportResolveRefused(ctx context.Context, rawURL string, err error) {
+	if ctx.Err() != nil {
+		return
+	}
+	f.metrics.incResolveRefused()
+	slog.Warn("fetch: destination not fetched, name did not resolve",
+		slog.String("host", hostOf(rawURL)), slog.Any("error", resolveCause(err)))
 }
 
 // hostOf returns the host of rawURL for logging, never the URL itself.
@@ -582,10 +595,18 @@ func (f *Fetcher) fetchViaProxy(ctx context.Context, fetchURL string, extra map[
 		headers[strings.ToLower(k)] = v
 	}
 
-	emptied := f.pool.emptiedCount()
+	// A pool with no proxies goes straight to the guarded direct client: the dead
+	// proxy would only cost go-stealth's retries.
+	if f.pool.empty() && f.poolFallback != nil {
+		return f.fetchViaPoolFallback(ctx, fetchURL, headers)
+	}
+
 	body, err := RetryDo(ctx, f.retryConfig, func() ([]byte, error) {
 		data, _, status, err := f.proxyClient.DoCtx(ctx, http.MethodGet, fetchURL, headers, nil)
 		if err != nil {
+			if isDeadProxyDial(err) {
+				return nil, &poolDryError{cause: err}
+			}
 			return nil, terminalIfBlocked(err)
 		}
 		if status != http.StatusOK {
@@ -593,21 +614,44 @@ func (f *Fetcher) fetchViaProxy(ctx context.Context, fetchURL string, extra map[
 		}
 		return data, nil
 	})
-	// The pool had no proxy for (some of) this request, so the proxy client was
-	// pointed at the dead emptyPoolProxy and the request failed. Run it on the
-	// guarded direct client, whose own checks decide the outcome.
-	if err != nil && f.poolFallback != nil && f.pool.emptiedCount() != emptied {
+	// The pool ran dry for THIS request: its dial went to the dead emptyPoolProxy.
+	// Attribution is per call, from the error. A healthy proxied request that
+	// failed for its own reason must not be re-sent direct, which would put the
+	// real address on the wire; only this one is.
+	var dry *poolDryError
+	if errors.As(err, &dry) && f.poolFallback != nil {
+		return f.fetchViaPoolFallback(ctx, fetchURL, headers)
+	}
+	return body, err
+}
+
+// poolWarnInterval bounds the dry-pool warning: a drained pool fails every
+// request, and one line per request would bury the log.
+const poolWarnInterval = time.Minute
+
+// fetchViaPoolFallback runs a request the proxy pool had no proxy for on the
+// guarded no-proxy client. This is real-address egress by policy (a dry pool
+// falls back to direct), so it is counted on go_engine_fetch_tier_total with
+// tier "direct_fallback" and warned about at most once per poolWarnInterval.
+func (f *Fetcher) fetchViaPoolFallback(ctx context.Context, fetchURL string, headers map[string]string) ([]byte, error) {
+	now := time.Now().UnixNano()
+	if last := f.lastPoolWarn.Load(); now-last >= int64(poolWarnInterval) && f.lastPoolWarn.CompareAndSwap(last, now) {
 		slog.Warn("fetch: proxy pool had no proxy, fetching on the guarded direct client")
-		return RetryDo(ctx, f.retryConfig, func() ([]byte, error) {
-			data, _, status, derr := f.poolFallback.DoCtx(ctx, http.MethodGet, fetchURL, headers, nil)
-			if derr != nil {
-				return nil, terminalIfBlocked(derr)
-			}
-			if status != http.StatusOK {
-				return nil, &stealth.HttpStatusError{StatusCode: status}
-			}
-			return data, nil
-		})
+	}
+	body, err := RetryDo(ctx, f.retryConfig, func() ([]byte, error) {
+		data, _, status, derr := f.poolFallback.DoCtx(ctx, http.MethodGet, fetchURL, headers, nil)
+		if derr != nil {
+			return nil, terminalIfBlocked(derr)
+		}
+		if status != http.StatusOK {
+			return nil, &stealth.HttpStatusError{StatusCode: status}
+		}
+		return data, nil
+	})
+	if err != nil {
+		f.metrics.incTier("direct_fallback", "err")
+	} else {
+		f.metrics.incTier("direct_fallback", "ok")
 	}
 	return body, err
 }
