@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.56.3](https://github.com/anatolykoptev/go-engine/compare/v1.56.2...v1.56.3) (2026-11-15)
+
+
+### Fixed
+
+* **fetch:** attribute a dry proxy pool to the request that hit it ([#115](https://github.com/anatolykoptev/go-engine/issues/115)) ([5e9c174](https://github.com/anatolykoptev/go-engine/commit/5e9c1744330ce4baa2c0b0d2b330994630968b6a))
+
 ## [1.56.2](https://github.com/anatolykoptev/go-engine/compare/v1.56.1...v1.56.2) (2026-11-15)
 
 
