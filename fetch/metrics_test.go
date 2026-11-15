@@ -28,6 +28,8 @@ type atomicMetrics struct {
 	cacheHosts     atomic.Int64
 	ssrfBlocked    atomic.Int64
 	resolveRefused atomic.Int64
+	fallbackOK     atomic.Int64
+	fallbackErr    atomic.Int64
 }
 
 func (m *atomicMetrics) incTier(tier, result string) {
@@ -40,6 +42,10 @@ func (m *atomicMetrics) incTier(tier, result string) {
 		m.tierProxy.Add(1)
 	case "proxy/err":
 		m.tierProxyErr.Add(1)
+	case "direct_fallback/ok":
+		m.fallbackOK.Add(1)
+	case "direct_fallback/err":
+		m.fallbackErr.Add(1)
 	}
 }
 
