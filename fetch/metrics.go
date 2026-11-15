@@ -12,7 +12,8 @@ import (
 // unless they wire up the default metrics themselves via InitMetrics.
 type fetchMetrics interface {
 	// incTier records a completed fetch for the given tier and result.
-	// tier: "direct" | "proxy"
+	// tier: "direct" | "proxy" | "direct_fallback" (a request the proxy pool had no
+	// proxy for, sent on the guarded direct client: real-address egress by policy)
 	// result: "ok" | "err"
 	incTier(tier, result string)
 
@@ -72,7 +73,7 @@ type promTierMetrics struct {
 func NewPromMetrics(reg prometheus.Registerer) (fetchMetrics, error) {
 	tierTotal := prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "go_engine_fetch_tier_total",
-		Help: "Number of fetches per tier (direct|proxy) and result (ok|err).",
+		Help: "Number of fetches per tier (direct|proxy|direct_fallback) and result (ok|err). direct_fallback is a request the proxy pool had no proxy for, sent direct.",
 	}, []string{"tier", "result"})
 
 	blockSignal := prometheus.NewCounterVec(prometheus.CounterOpts{
