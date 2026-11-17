@@ -6,8 +6,8 @@ github.com/PuerkitoBio/goquery v1.11.0 h1:jZ7pwMQXIITcUXNH83LLk+txlaEy6NVOfTuP43
 github.com/PuerkitoBio/goquery v1.11.0/go.mod h1:wQHgxUOU3JGuj3oD/QFfxUdlzW6xPHfqyHre6VMY4DQ=
 github.com/RadhiFadlillah/whatlanggo v0.0.0-20240916001553-aac1f0f737fc h1:6aA31zw7fnfJ/G1ebisIesCDl44slkIVFqk3YTSadd8=
 github.com/RadhiFadlillah/whatlanggo v0.0.0-20240916001553-aac1f0f737fc/go.mod h1:PgrPWaMBxL1lyq1k5DEMqC0Y67R3pG1vEsHzxFXeDxc=
-github.com/anatolykoptev/go-kit v0.97.22 h1:NkV6d5GROPEYwlOTJ0k1hZSN7Z/E+w4pazKfpBjNfWc=
-github.com/anatolykoptev/go-kit v0.97.22/go.mod h1:UggcOlHEI7khAi8FUdUM5LwvEyfsEWWbm3J2VuWSDFg=
+github.com/anatolykoptev/go-kit v0.97.24 h1:57LvK0kf02HuUr145UxHZHCUjaUBWkaJFZ9jtiH/+Ok=
+github.com/anatolykoptev/go-kit v0.97.24/go.mod h1:UggcOlHEI7khAi8FUdUM5LwvEyfsEWWbm3J2VuWSDFg=
 github.com/anatolykoptev/go-stealth v1.30.0 h1:j8GwqQti/Na3DFRP4np7aAPFUz+3TskPWBnS39EI99o=
 github.com/anatolykoptev/go-stealth v1.30.0/go.mod h1:dAxiYvPsPu6P1PIMLaAbyJUjZ068HzzTZK9OH9xZFas=
 github.com/andybalholm/brotli v1.2.7 h1:UgafRPGMam5ySHfRkhthMqOFA6IFoeF3D7mWIDLjG5A=
